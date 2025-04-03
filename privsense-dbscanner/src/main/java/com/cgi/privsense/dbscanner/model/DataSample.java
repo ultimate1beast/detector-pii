@@ -9,9 +9,11 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Represents a sample of data from a table.
+ * Simplified implementation with a single entry point for creation.
  */
 @Getter
 @Builder
@@ -48,49 +50,101 @@ public class DataSample implements Serializable {
 
     /**
      * Creates a data sample from a list of rows.
+     * Single factory method to replace multiple constructors and factory methods.
+     *
+     * @param tableName Table name
+     * @param rows List of rows
+     * @param totalRowsInTable Optional total rows in the table (if known)
+     * @return Data sample
+     */
+    public static DataSample create(String tableName, List<Map<String, Object>> rows, Integer totalRowsInTable) {
+        Objects.requireNonNull(tableName, "Table name cannot be null");
+
+        // Handle null or empty rows
+        List<Map<String, Object>> safeRows = rows != null ? rows : List.of();
+
+        // Extract column names from the first row, or empty list if no rows
+        List<String> columnNames = safeRows.isEmpty()
+                ? List.of()
+                : new ArrayList<>(safeRows.getFirst().keySet());
+
+        // Use provided total rows or default to sample size
+        int actualTotal = totalRowsInTable != null ? totalRowsInTable : safeRows.size();
+
+        return DataSample.builder()
+                .tableName(tableName)
+                .rows(safeRows)
+                .columnNames(columnNames)
+                .totalRows(actualTotal)
+                .sampleSize(safeRows.size())
+                .build();
+    }
+
+    /**
+     * Overloaded method when total rows equals sample size.
      *
      * @param tableName Table name
      * @param rows List of rows
      * @return Data sample
      */
-    public static DataSample fromRows(String tableName, List<Map<String, Object>> rows) {
+    public static DataSample create(String tableName, List<Map<String, Object>> rows) {
+        return create(tableName, rows, null);
+    }
+
+    /**
+     * Gets a subset of this sample containing only the first N rows.
+     *
+     * @param maxRows Maximum number of rows
+     * @return A new DataSample with at most maxRows rows
+     */
+    public DataSample limit(int maxRows) {
+        if (maxRows >= rows.size()) {
+            return this; // No need to create a new object
+        }
+
+        List<Map<String, Object>> limitedRows = rows.subList(0, maxRows);
         return DataSample.builder()
                 .tableName(tableName)
-                .rows(rows)
-                .columnNames(rows.isEmpty() ? List.of() : new ArrayList<>(rows.getFirst().keySet()))
-                .totalRows(rows.size())
-                .sampleSize(rows.size())
+                .rows(limitedRows)
+                .columnNames(columnNames)
+                .totalRows(totalRows)
+                .sampleSize(limitedRows.size())
                 .build();
     }
 
     /**
-     * Constructor with table name and rows.
+     * Gets the column values for a specific column.
      *
-     * @param tableName Table name
-     * @param rows List of rows
+     * @param columnName Name of the column
+     * @return List of values for the column
      */
-    public DataSample(String tableName, List<Map<String, Object>> rows) {
-        this.tableName = tableName;
-        this.rows = rows;
-        this.columnNames = rows.isEmpty() ? List.of() : new ArrayList<>(rows.getFirst().keySet());
-        this.totalRows = rows.size();
-        this.sampleSize = rows.size();
+    public List<Object> getColumnValues(String columnName) {
+        if (!columnNames.contains(columnName)) {
+            return List.of();
+        }
+
+        List<Object> values = new ArrayList<>(rows.size());
+        for (Map<String, Object> row : rows) {
+            values.add(row.get(columnName));
+        }
+        return values;
     }
 
     /**
-     * Constructor with all properties.
+     * Checks if this sample has any rows.
      *
-     * @param tableName Table name
-     * @param columnNames List of column names
-     * @param rows List of rows
-     * @param totalRows Total number of rows in the table
-     * @param sampleSize Number of rows in this sample
+     * @return true if the sample contains at least one row
      */
-    public DataSample(String tableName, List<String> columnNames, List<Map<String, Object>> rows, int totalRows, int sampleSize) {
-        this.tableName = tableName;
-        this.columnNames = columnNames;
-        this.rows = rows;
-        this.totalRows = totalRows;
-        this.sampleSize = sampleSize;
+    public boolean isEmpty() {
+        return rows.isEmpty();
+    }
+
+    /**
+     * Gets the number of columns in this sample.
+     *
+     * @return Number of columns
+     */
+    public int getColumnCount() {
+        return columnNames.size();
     }
 }
