@@ -1,7 +1,7 @@
 package com.cgi.privsense.dbscanner.core.driver;
 
 import com.cgi.privsense.common.config.GlobalProperties;
-import com.cgi.privsense.dbscanner.exception.DriverException;
+import com.cgi.privsense.dbscanner.exception.DatabaseOperationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -14,9 +14,11 @@ import java.nio.file.Paths;
 import java.sql.Driver;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * Implementation of DriverManager that downloads drivers from Maven Central.
+ * Optimized with better error handling and thread safety.
  */
 @Slf4j
 @Component
@@ -42,20 +44,19 @@ public class MavenDriverManager implements DriverManager {
     private final String repositoryUrl;
 
     /**
+     * Lock for thread-safe driver loading.
+     */
+    private final ReentrantReadWriteLock driversLock = new ReentrantReadWriteLock();
+
+    /**
      * Constructor with GlobalProperties for centralized configuration.
      *
      * @param properties Global application properties
-     *
      */
-    public MavenDriverManager(
-            GlobalProperties properties
-
-    ) {
-        // Use the new GlobalProperties if available, fall back to legacy props if needed
-        this.driverMavenCoordinates = properties.getDbScanner().getDrivers().getCoordinates();
-
-        this.driversDir = Paths.get(properties.getDbScanner().getDrivers().getDirectory());
-        this.repositoryUrl = properties.getDbScanner().getDrivers().getRepositoryUrl();
+    public MavenDriverManager(GlobalProperties properties) {
+        this.driverMavenCoordinates = properties.getDrivers().getCoordinates();
+        this.driversDir = Paths.get(properties.getDrivers().getDirectory());
+        this.repositoryUrl = properties.getDrivers().getRepositoryUrl();
 
         try {
             // Create the drivers directory if it doesn't exist
@@ -63,42 +64,70 @@ public class MavenDriverManager implements DriverManager {
             log.info("Driver directory initialized at {}", driversDir);
         } catch (Exception e) {
             log.error("Failed to create drivers directory: {}", driversDir, e);
-            throw new DriverException("Failed to create drivers directory", e);
+            throw DatabaseOperationException.driverError("Failed to create drivers directory", e);
         }
     }
 
     @Override
-    public void ensureDriverAvailable(String driverClassName) throws DriverException {
+    public void ensureDriverAvailable(String driverClassName) {
+        if (driverClassName == null || driverClassName.isEmpty()) {
+            throw DatabaseOperationException.driverError("Driver class name cannot be null or empty");
+        }
+
+        // First check without locking
         if (isDriverLoaded(driverClassName)) {
             log.debug("Driver already loaded: {}", driverClassName);
             return;
         }
 
+        // Use lock for the downloading and loading part
+        driversLock.readLock().lock();
         try {
-            // Get the Maven coordinates for the driver
+            // Double-check after acquiring the lock (in case another thread just loaded it)
+            if (isDriverLoaded(driverClassName)) {
+                log.debug("Driver already loaded (detected after lock): {}", driverClassName);
+                return;
+            }
+        } finally {
+            driversLock.readLock().unlock();
+        }
+
+        // Upgrade to write lock for loading
+        driversLock.writeLock().lock();
+        try {
+            // Triple-check to be absolutely sure (in case it was loaded while we were acquiring the write lock)
+            if (isDriverLoaded(driverClassName)) {
+                log.debug("Driver already loaded (detected after write lock): {}", driverClassName);
+                return;
+            }
+
             String mavenCoordinates = driverMavenCoordinates.get(driverClassName);
             if (mavenCoordinates == null) {
-                throw new DriverException("Unknown driver: " + driverClassName);
+                throw DatabaseOperationException.driverError("Unknown driver: " + driverClassName +
+                        ". Add Maven coordinates to configuration properties.");
             }
 
             // Download and load the driver
             Path driverJar = downloadDriver(mavenCoordinates);
             loadDriver(driverClassName, driverJar);
 
+            log.info("Successfully loaded driver: {}", driverClassName);
         } catch (Exception e) {
             log.error("Failed to load driver: {}", driverClassName, e);
-            throw new DriverException("Failed to load driver: " + driverClassName, e);
+            throw DatabaseOperationException.driverError("Failed to load driver: " + driverClassName, e);
+        } finally {
+            driversLock.writeLock().unlock();
         }
     }
 
     @Override
     public boolean isDriverLoaded(String driverClassName) {
-        // First check if we've loaded it already
+        // First check the cache of already loaded drivers
         if (loadedDrivers.containsKey(driverClassName)) {
             return true;
         }
 
-        // Otherwise, check if the class is available
+        // Then check if the class is available in the classpath
         try {
             Class.forName(driverClassName);
             return true;
@@ -109,28 +138,48 @@ public class MavenDriverManager implements DriverManager {
 
     @Override
     public Driver getDriver(String driverClassName) {
+        if (driverClassName == null || driverClassName.isEmpty()) {
+            throw DatabaseOperationException.driverError("Driver class name cannot be null or empty");
+        }
+
+        // Ensure driver is loaded
+        if (!isDriverLoaded(driverClassName)) {
+            ensureDriverAvailable(driverClassName);
+        }
+
         return loadedDrivers.get(driverClassName);
     }
 
     /**
-     * Downloads a driver JAR from Maven Central.
+     * Downloads a driver JAR from Maven Central with improved error handling.
      *
      * @param mavenCoordinates Maven coordinates of the driver
      * @return Path to the downloaded JAR
      */
     private Path downloadDriver(String mavenCoordinates) {
+        if (mavenCoordinates == null || mavenCoordinates.isEmpty() || !mavenCoordinates.contains(":")) {
+            throw DatabaseOperationException.driverError("Invalid Maven coordinates format: " + mavenCoordinates);
+        }
+
         String[] parts = mavenCoordinates.split(":");
+        if (parts.length < 3) {
+            throw DatabaseOperationException.driverError(
+                    "Maven coordinates must have at least groupId, artifactId and version: " + mavenCoordinates);
+        }
+
         String groupId = parts[0].replace('.', '/');
         String artifactId = parts[1];
         String version = parts[2];
 
         Path jarPath = driversDir.resolve(artifactId + "-" + version + ".jar");
 
+        // Check if jar already exists
         if (Files.exists(jarPath)) {
             log.debug("Driver jar already exists: {}", jarPath);
             return jarPath;
         }
 
+        // Build the Maven repository URI
         URI uri = URI.create(String.format(
                 "%s/%s/%s/%s/%s-%s.jar",
                 repositoryUrl, groupId, artifactId, version, artifactId, version
@@ -138,16 +187,25 @@ public class MavenDriverManager implements DriverManager {
 
         try {
             log.info("Downloading driver from: {}", uri);
-            Files.copy(uri.toURL().openStream(), jarPath);
+
+            // Create temporary file first
+            Path tempFile = Files.createTempFile(driversDir, "downloading-", ".tmp");
+
+            // Download to temporary file
+            Files.copy(uri.toURL().openStream(), tempFile);
+
+            // Move to final location atomically
+            Files.move(tempFile, jarPath);
+
             log.info("Driver downloaded successfully: {}", jarPath);
             return jarPath;
         } catch (Exception e) {
-            throw new DriverException("Failed to download driver: " + uri, e);
+            throw DatabaseOperationException.driverError("Failed to download driver: " + uri, e);
         }
     }
 
     /**
-     * Loads a driver from a JAR file.
+     * Loads a driver from a JAR file with improved error handling.
      *
      * @param driverClassName Name of the driver class
      * @param jarPath Path to the JAR file
@@ -171,8 +229,11 @@ public class MavenDriverManager implements DriverManager {
             loadedDrivers.put(driverClassName, driver);
             log.info("Successfully loaded driver: {}", driverClassName);
 
+        } catch (ClassNotFoundException e) {
+            throw DatabaseOperationException.driverError(
+                    "Driver class not found: " + driverClassName + ". Check Maven coordinates.", e);
         } catch (Exception e) {
-            throw new DriverException("Failed to load driver class: " + driverClassName, e);
+            throw DatabaseOperationException.driverError("Failed to load driver class: " + driverClassName, e);
         }
     }
 }
