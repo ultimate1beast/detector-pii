@@ -1,6 +1,7 @@
 package com.cgi.privsense.dbscanner.core.driver;
 
-import com.cgi.privsense.dbscanner.exception.DriverException;
+import com.cgi.privsense.dbscanner.exception.DatabaseOperationException;
+
 
 import java.sql.Driver;
 
@@ -14,9 +15,9 @@ public interface DriverManager {
      * Downloads and loads the driver if necessary.
      *
      * @param driverClassName The fully qualified class name of the driver
-     * @throws DriverException If the driver cannot be loaded
+     * @throws DatabaseOperationException If the driver cannot be loaded
      */
-    void ensureDriverAvailable(String driverClassName) throws DriverException;
+    void ensureDriverAvailable(String driverClassName) throws DatabaseOperationException;
 
     /**
      * Checks if a driver is already loaded.
