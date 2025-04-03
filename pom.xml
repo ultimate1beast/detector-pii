@@ -75,6 +75,9 @@
 					<configuration>
 						<source>${java.version}</source>
 						<target>${java.version}</target>
+						<compilerArgs>
+							<arg>-parameters</arg>
+						</compilerArgs>
 						<annotationProcessorPaths>
 							<path>
 								<groupId>org.projectlombok</groupId>
@@ -84,13 +87,16 @@
 						</annotationProcessorPaths>
 					</configuration>
 				</plugin>
-				<plugin>
-					<groupId>org.springframework.boot</groupId>
-					<artifactId>spring-boot-maven-plugin</artifactId>
-					<version>${spring-boot.version}</version>
-				</plugin>
 			</plugins>
 		</pluginManagement>
+
+		<!-- Add this section to ensure the plugin is applied to all modules -->
+		<plugins>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-compiler-plugin</artifactId>
+			</plugin>
+		</plugins>
 	</build>
 
 </project>
