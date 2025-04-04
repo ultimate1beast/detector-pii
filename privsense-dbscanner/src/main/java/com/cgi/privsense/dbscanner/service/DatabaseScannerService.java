@@ -3,7 +3,7 @@ package com.cgi.privsense.dbscanner.service;
 import com.cgi.privsense.dbscanner.core.datasource.DataSourceProvider;
 import com.cgi.privsense.dbscanner.core.scanner.DatabaseScanner;
 import com.cgi.privsense.dbscanner.core.scanner.DatabaseScannerFactory;
-import com.cgi.privsense.dbscanner.exception.ScannerException;
+import com.cgi.privsense.dbscanner.exception.DatabaseOperationException;
 import com.cgi.privsense.dbscanner.model.ColumnMetadata;
 import com.cgi.privsense.dbscanner.model.DataSample;
 import com.cgi.privsense.dbscanner.model.RelationshipMetadata;
@@ -15,10 +15,11 @@ import org.springframework.stereotype.Service;
 
 import javax.sql.DataSource;
 import java.util.List;
-
+import java.util.function.Function;
 
 /**
- * Service for scanning databases.
+ * Service for scanning databases with template methods.
+ * Optimized implementation with better error handling and reduced duplication.
  */
 @Service
 public class DatabaseScannerService implements ScannerService {
@@ -61,6 +62,30 @@ public class DatabaseScannerService implements ScannerService {
     }
 
     /**
+     * Template method for scanner operations to reduce code duplication.
+     *
+     * @param operation Name of the operation for logging
+     * @param dbType Database type
+     * @param dataSourceName Data source name
+     * @param scannerFunction Function to execute with the scanner
+     * @param <T> Return type
+     * @return Result of the scanner function
+     */
+    private <T> T executeScannerOperation(String operation, String dbType, String dataSourceName,
+                                          Function<DatabaseScanner, T> scannerFunction) {
+        try {
+            logger.info("Executing {} for: {}/{}", operation, dbType, dataSourceName);
+            DatabaseScanner scanner = getScanner(dbType, dataSourceName);
+            T result = scannerFunction.apply(scanner);
+            logger.debug("{} completed successfully", operation);
+            return result;
+        } catch (Exception e) {
+            logger.error("Error during {}: {}", operation, e.getMessage(), e);
+            throw DatabaseOperationException.scannerError("Failed to execute " + operation, e);
+        }
+    }
+
+    /**
      * Scans all tables in a database.
      *
      * @param dbType Database type
@@ -70,13 +95,7 @@ public class DatabaseScannerService implements ScannerService {
     @Override
     @Cacheable(value = "tableMetadata", key = "#dbType + '-' + #dataSourceName")
     public List<TableMetadata> scanTables(String dbType, String dataSourceName) {
-        try {
-            logger.info("Scanning tables for: {}/{}", dbType, dataSourceName);
-            return getScanner(dbType, dataSourceName).scanTables();
-        } catch (Exception e) {
-            logger.error("Error scanning tables: {}", e.getMessage(), e);
-            throw new ScannerException("Failed to scan tables", e);
-        }
+        return executeScannerOperation("scanTables", dbType, dataSourceName, DatabaseScanner::scanTables);
     }
 
     /**
@@ -90,13 +109,7 @@ public class DatabaseScannerService implements ScannerService {
     @Override
     @Cacheable(value = "tableMetadata", key = "#dbType + '-' + #dataSourceName + '-' + #tableName")
     public TableMetadata scanTable(String dbType, String dataSourceName, String tableName) {
-        try {
-            logger.info("Scanning table: {}/{}/{}", dbType, dataSourceName, tableName);
-            return getScanner(dbType, dataSourceName).scanTable(tableName);
-        } catch (Exception e) {
-            logger.error("Error scanning table {}: {}", tableName, e.getMessage(), e);
-            throw new ScannerException("Failed to scan table: " + tableName, e);
-        }
+        return executeScannerOperation("scanTable", dbType, dataSourceName, scanner -> scanner.scanTable(tableName));
     }
 
     /**
@@ -110,13 +123,7 @@ public class DatabaseScannerService implements ScannerService {
     @Override
     @Cacheable(value = "columnMetadata", key = "#dbType + '-' + #dataSourceName + '-' + #tableName")
     public List<ColumnMetadata> scanColumns(String dbType, String dataSourceName, String tableName) {
-        try {
-            logger.info("Scanning columns for table: {}/{}/{}", dbType, dataSourceName, tableName);
-            return getScanner(dbType, dataSourceName).scanColumns(tableName);
-        } catch (Exception e) {
-            logger.error("Error scanning columns for table {}: {}", tableName, e.getMessage(), e);
-            throw new ScannerException("Failed to scan columns for table: " + tableName, e);
-        }
+        return executeScannerOperation("scanColumns", dbType, dataSourceName, scanner -> scanner.scanColumns(tableName));
     }
 
     /**
@@ -130,13 +137,8 @@ public class DatabaseScannerService implements ScannerService {
      */
     @Override
     public DataSample sampleData(String dbType, String dataSourceName, String tableName, int limit) {
-        try {
-            logger.info("Sampling data from table: {}/{}/{} (limit: {})", dbType, dataSourceName, tableName, limit);
-            return getScanner(dbType, dataSourceName).sampleTableData(tableName, limit);
-        } catch (Exception e) {
-            logger.error("Error sampling data from table {}: {}", tableName, e.getMessage(), e);
-            throw new ScannerException("Failed to sample data from table: " + tableName, e);
-        }
+        return executeScannerOperation("sampleData", dbType, dataSourceName,
+                scanner -> scanner.sampleTableData(tableName, limit));
     }
 
     /**
@@ -151,14 +153,8 @@ public class DatabaseScannerService implements ScannerService {
      */
     @Override
     public List<Object> sampleColumnData(String dbType, String dataSourceName, String tableName, String columnName, int limit) {
-        try {
-            logger.info("Sampling data from column: {}/{}/{}/{} (limit: {})",
-                    dbType, dataSourceName, tableName, columnName, limit);
-            return getScanner(dbType, dataSourceName).sampleColumnData(tableName, columnName, limit);
-        } catch (Exception e) {
-            logger.error("Error sampling data from column {}.{}: {}", tableName, columnName, e.getMessage(), e);
-            throw new ScannerException("Failed to sample data from column: " + tableName + "." + columnName, e);
-        }
+        return executeScannerOperation("sampleColumnData", dbType, dataSourceName,
+                scanner -> scanner.sampleColumnData(tableName, columnName, limit));
     }
 
     /**
@@ -172,12 +168,7 @@ public class DatabaseScannerService implements ScannerService {
     @Override
     @Cacheable(value = "relationshipMetadata", key = "#dbType + '-' + #dataSourceName + '-' + #tableName")
     public List<RelationshipMetadata> getTableRelationships(String dbType, String dataSourceName, String tableName) {
-        try {
-            logger.info("Getting relationships for table: {}/{}/{}", dbType, dataSourceName, tableName);
-            return getScanner(dbType, dataSourceName).getTableRelationships(tableName);
-        } catch (Exception e) {
-            logger.error("Error getting relationships for table {}: {}", tableName, e.getMessage(), e);
-            throw new ScannerException("Failed to get relationships for table: " + tableName, e);
-        }
+        return executeScannerOperation("getTableRelationships", dbType, dataSourceName,
+                scanner -> scanner.getTableRelationships(tableName));
     }
 }

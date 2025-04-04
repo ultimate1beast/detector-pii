@@ -3,7 +3,7 @@ package com.cgi.privsense.dbscanner.scanner;
 import com.cgi.privsense.common.util.DatabaseUtils;
 import com.cgi.privsense.dbscanner.core.scanner.AbstractDatabaseScanner;
 import com.cgi.privsense.dbscanner.core.scanner.DatabaseType;
-import com.cgi.privsense.dbscanner.exception.DatabaseScannerException;
+import com.cgi.privsense.dbscanner.exception.DatabaseOperationException;
 import com.cgi.privsense.dbscanner.model.ColumnMetadata;
 import com.cgi.privsense.dbscanner.model.DataSample;
 import com.cgi.privsense.dbscanner.model.RelationshipMetadata;
@@ -11,17 +11,20 @@ import com.cgi.privsense.dbscanner.model.TableMetadata;
 import org.springframework.stereotype.Component;
 
 import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.*;
 
 /**
  * Scanner implementation for MySQL databases.
+ * Optimized implementation for scanning and introspecting MySQL databases.
  */
 @Component
 @DatabaseType("mysql")
 public class MySQLDatabaseScanner extends AbstractDatabaseScanner {
-    // SQL constants for reuse
+    // SQL constants for reuse with optimized queries
     private static final String SQL_SCAN_TABLES = """
         SELECT 
             t.TABLE_NAME,
@@ -50,6 +53,36 @@ public class MySQLDatabaseScanner extends AbstractDatabaseScanner {
                 t.CREATE_TIME, t.UPDATE_TIME, t.ENGINE
     """;
 
+    // Specific query for a single table
+    private static final String SQL_SCAN_TABLE = """
+        SELECT 
+            t.TABLE_NAME,
+            t.TABLE_SCHEMA as TABLE_CATALOG,
+            t.TABLE_SCHEMA as `SCHEMA`,
+            t.TABLE_TYPE as TYPE,
+            t.TABLE_COMMENT as REMARKS,
+            t.TABLE_ROWS as ROW_COUNT,
+            t.AUTO_INCREMENT,
+            t.CREATE_TIME,
+            t.UPDATE_TIME,
+            t.ENGINE,
+            GROUP_CONCAT(DISTINCT c.COLUMN_NAME) as COLUMNS,
+            GROUP_CONCAT(DISTINCT k.REFERENCED_TABLE_NAME) as REFERENCED_TABLES
+        FROM information_schema.TABLES t
+        LEFT JOIN information_schema.COLUMNS c 
+            ON t.TABLE_SCHEMA = c.TABLE_SCHEMA 
+            AND t.TABLE_NAME = c.TABLE_NAME
+        LEFT JOIN information_schema.KEY_COLUMN_USAGE k
+            ON t.TABLE_SCHEMA = k.TABLE_SCHEMA 
+            AND t.TABLE_NAME = k.TABLE_NAME
+            AND k.REFERENCED_TABLE_NAME IS NOT NULL
+        WHERE t.TABLE_SCHEMA = database() AND t.TABLE_NAME = ?
+        GROUP BY t.TABLE_NAME, t.TABLE_SCHEMA, t.TABLE_TYPE, 
+                t.TABLE_COMMENT, t.TABLE_ROWS, t.AUTO_INCREMENT,
+                t.CREATE_TIME, t.UPDATE_TIME, t.ENGINE
+    """;
+
+    // Query for columns with foreign key information
     private static final String SQL_SCAN_COLUMNS = """
         SELECT 
             c.COLUMN_NAME,
@@ -77,9 +110,12 @@ public class MySQLDatabaseScanner extends AbstractDatabaseScanner {
         ORDER BY c.ORDINAL_POSITION
     """;
 
-    private static final String SQL_GET_RELATIONSHIPS = """
+    // Improved UNION query for both outgoing and incoming relationships
+    private static final String SQL_GET_ALL_RELATIONSHIPS = """
+        -- Outgoing relationships (FKs from this table to others)
         SELECT 
             tc.CONSTRAINT_NAME,
+            'OUTGOING' as RELATIONSHIP_DIRECTION,
             tc.CONSTRAINT_TYPE,
             tc.TABLE_NAME as SOURCE_TABLE,
             kcu.REFERENCED_TABLE_NAME as TARGET_TABLE,
@@ -98,16 +134,41 @@ public class MySQLDatabaseScanner extends AbstractDatabaseScanner {
         WHERE tc.TABLE_SCHEMA = database()
         AND tc.TABLE_NAME = ?
         AND tc.CONSTRAINT_TYPE = 'FOREIGN KEY'
-        ORDER BY tc.CONSTRAINT_NAME, kcu.ORDINAL_POSITION
+        
+        UNION ALL
+        
+        -- Incoming relationships (FKs from other tables to this one)
+        SELECT 
+            tc.CONSTRAINT_NAME,
+            'INCOMING' as RELATIONSHIP_DIRECTION,
+            tc.CONSTRAINT_TYPE,
+            tc.TABLE_NAME as SOURCE_TABLE,
+            ? as TARGET_TABLE,
+            database() as TARGET_SCHEMA,
+            rc.UPDATE_RULE,
+            rc.DELETE_RULE,
+            kcu.COLUMN_NAME as SOURCE_COLUMN,
+            kcu.REFERENCED_COLUMN_NAME as TARGET_COLUMN
+        FROM information_schema.TABLE_CONSTRAINTS tc
+        JOIN information_schema.KEY_COLUMN_USAGE kcu
+            ON tc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
+            AND tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+        LEFT JOIN information_schema.REFERENTIAL_CONSTRAINTS rc
+            ON tc.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA
+            AND tc.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
+        WHERE tc.TABLE_SCHEMA = database()
+        AND kcu.REFERENCED_TABLE_SCHEMA = database()
+        AND kcu.REFERENCED_TABLE_NAME = ?
+        AND tc.CONSTRAINT_TYPE = 'FOREIGN KEY'
     """;
 
     /**
-     * Constructor.
+     * Constructor with customized JDBC settings for MySQL.
      *
      * @param dataSource The data source
      */
     public MySQLDatabaseScanner(DataSource dataSource) {
-        super(dataSource, "mysql");
+        super(dataSource, "mysql", new JdbcSettings(500, 5000, 60));
     }
 
     /**
@@ -161,7 +222,7 @@ public class MySQLDatabaseScanner extends AbstractDatabaseScanner {
      */
     @Override
     public List<ColumnMetadata> scanColumns(String tableName) {
-        validateTableName(tableName);
+        DatabaseUtils.validateTableName(tableName);
         return executeQuery("scanColumns", jdbc ->
                 jdbc.query(SQL_SCAN_COLUMNS, (rs, rowNum) -> mapColumnMetadata(rs, tableName), tableName)
         );
@@ -200,22 +261,16 @@ public class MySQLDatabaseScanner extends AbstractDatabaseScanner {
      */
     @Override
     public TableMetadata scanTable(String tableName) {
-        validateTableName(tableName);
+        DatabaseUtils.validateTableName(tableName);
         return executeQuery("scanTable", jdbc -> {
-            // Modify the SQL query to properly place the table name filter in the WHERE clause
-            String modifiedSql = SQL_SCAN_TABLES.replace(
-                    "WHERE t.TABLE_SCHEMA = database()",
-                    "WHERE t.TABLE_SCHEMA = database() AND t.TABLE_NAME = ?"
-            );
-
             List<TableMetadata> tables = jdbc.query(
-                    modifiedSql,
+                    SQL_SCAN_TABLE,
                     this::mapTableMetadata,
                     tableName
             );
 
             if (tables.isEmpty()) {
-                throw new DatabaseScannerException("Table not found: " + tableName);
+                throw DatabaseOperationException.scannerError("Table not found: " + tableName);
             }
 
             TableMetadata table = tables.getFirst();
@@ -225,222 +280,101 @@ public class MySQLDatabaseScanner extends AbstractDatabaseScanner {
     }
 
     /**
-     * Samples data from a table.
-     *
-     * @param tableName Table name
-     * @param limit Maximum number of rows
-     * @return Data sample
-     */
-    @Override
-    public DataSample sampleTableData(String tableName, int limit) {
-        validateTableName(tableName);
-        return executeQuery("sampleTableData", jdbc -> {
-            String sql = String.format("SELECT * FROM %s LIMIT ?", escapeIdentifier(tableName));
-            List<Map<String, Object>> rows = jdbc.queryForList(sql, limit);
-            return DataSample.fromRows(tableName, rows);
-        });
-    }
-
-    /**
-     * Samples data from a column.
-     *
-     * @param tableName Table name
-     * @param columnName Column name
-     * @param limit Maximum number of values
-     * @return List of sampled values
-     */
-    @Override
-    public List<Object> sampleColumnData(String tableName, String columnName, int limit) {
-        validateTableName(tableName);
-        validateColumnName(columnName);
-
-        String sql = String.format("SELECT %s FROM %s LIMIT ?",
-                escapeIdentifier(columnName),
-                escapeIdentifier(tableName));
-
-        return executeQuery("sampleColumnData", jdbc ->
-                jdbc.queryForList(sql, Object.class, limit)
-        );
-    }
-
-    /**
      * Gets detailed relationships for a table, including both outgoing and incoming relationships.
+     * Uses a single, optimized UNION query.
      *
      * @param tableName Table name
      * @return List of relationship metadata
      */
     @Override
     public List<RelationshipMetadata> getTableRelationships(String tableName) {
-        validateTableName(tableName);
+        DatabaseUtils.validateTableName(tableName);
         logger.info("Retrieving relationships for table: {}", tableName);
 
         return executeQuery("getTableRelationships", jdbc -> {
+            // Execute the UNION query with parameters for both parts
+            List<Map<String, Object>> results = jdbc.queryForList(
+                    SQL_GET_ALL_RELATIONSHIPS,
+                    tableName, // For outgoing relationships
+                    tableName, // For incoming relationships (as target)
+                    tableName  // For incoming relationships (as target)
+            );
+
+            logger.info("Found {} relationships for table {}", results.size(), tableName);
+
+            // Process results into relationship metadata objects
             Map<String, RelationshipMetadata> relationshipsMap = new HashMap<>();
 
-            // SQL for outgoing relationships (FKs defined on this table)
-            String outgoingRelationshipsSql = """
-            SELECT 
-                tc.CONSTRAINT_NAME,
-                'OUTGOING' as RELATIONSHIP_DIRECTION,
-                tc.CONSTRAINT_TYPE,
-                tc.TABLE_NAME as SOURCE_TABLE,
-                kcu.REFERENCED_TABLE_NAME as TARGET_TABLE,
-                kcu.REFERENCED_TABLE_SCHEMA as TARGET_SCHEMA,
-                rc.UPDATE_RULE,
-                rc.DELETE_RULE,
-                kcu.COLUMN_NAME as SOURCE_COLUMN,
-                kcu.REFERENCED_COLUMN_NAME as TARGET_COLUMN
-            FROM information_schema.TABLE_CONSTRAINTS tc
-            JOIN information_schema.KEY_COLUMN_USAGE kcu
-                ON tc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
-                AND tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
-            LEFT JOIN information_schema.REFERENTIAL_CONSTRAINTS rc
-                ON tc.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA
-                AND tc.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
-            WHERE tc.TABLE_SCHEMA = database()
-            AND tc.TABLE_NAME = ?
-            AND tc.CONSTRAINT_TYPE = 'FOREIGN KEY'
-        """;
-
-            // SQL for incoming relationships (FKs that reference this table)
-            String incomingRelationshipsSql = """
-            SELECT 
-                tc.CONSTRAINT_NAME,
-                'INCOMING' as RELATIONSHIP_DIRECTION,
-                tc.CONSTRAINT_TYPE,
-                tc.TABLE_NAME as SOURCE_TABLE,
-                ? as TARGET_TABLE,
-                database() as TARGET_SCHEMA,
-                rc.UPDATE_RULE,
-                rc.DELETE_RULE,
-                kcu.COLUMN_NAME as SOURCE_COLUMN,
-                kcu.REFERENCED_COLUMN_NAME as TARGET_COLUMN
-            FROM information_schema.TABLE_CONSTRAINTS tc
-            JOIN information_schema.KEY_COLUMN_USAGE kcu
-                ON tc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
-                AND tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
-            LEFT JOIN information_schema.REFERENTIAL_CONSTRAINTS rc
-                ON tc.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA
-                AND tc.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
-            WHERE tc.TABLE_SCHEMA = database()
-            AND kcu.REFERENCED_TABLE_SCHEMA = database()
-            AND kcu.REFERENCED_TABLE_NAME = ?
-            AND tc.CONSTRAINT_TYPE = 'FOREIGN KEY'
-        """;
-
-            // Process outgoing relationships
-            List<Map<String, Object>> outgoingResults = jdbc.queryForList(outgoingRelationshipsSql, tableName);
-            logger.info("Found {} outgoing relationships", outgoingResults.size());
-
-            for (Map<String, Object> row : outgoingResults) {
+            for (Map<String, Object> row : results) {
                 String constraintName = (String) row.get("CONSTRAINT_NAME");
-                String directionKey = "OUTGOING_" + constraintName;
+                String direction = (String) row.get("RELATIONSHIP_DIRECTION");
+                String directionKey = direction + "_" + constraintName;
 
-                logger.info("Processing outgoing relationship: {}, source: {}, target: {}",
-                        constraintName, row.get("SOURCE_TABLE"), row.get("TARGET_TABLE"));
+                logger.debug("Processing {} relationship: {}", direction.toLowerCase(), constraintName);
 
-                RelationshipMetadata rel = new RelationshipMetadata();
-                rel.setName(constraintName);
-                rel.setConstraintType((String) row.get("CONSTRAINT_TYPE"));
-                rel.setSourceTable((String) row.get("SOURCE_TABLE"));
-                rel.setTargetTable((String) row.get("TARGET_TABLE"));
-                rel.setTargetSchema((String) row.get("TARGET_SCHEMA"));
-                rel.setUpdateRule((String) row.get("UPDATE_RULE"));
-                rel.setDeleteRule((String) row.get("DELETE_RULE"));
-                rel.setDirection("OUTGOING");
+                // Get existing relationship or create new one
+                RelationshipMetadata rel = relationshipsMap.computeIfAbsent(directionKey, k -> {
+                    RelationshipMetadata newRel = new RelationshipMetadata();
+                    newRel.setName(constraintName);
+                    newRel.setConstraintType((String) row.get("CONSTRAINT_TYPE"));
+                    newRel.setSourceTable((String) row.get("SOURCE_TABLE"));
+                    newRel.setTargetTable((String) row.get("TARGET_TABLE"));
+                    newRel.setTargetSchema((String) row.get("TARGET_SCHEMA"));
+                    newRel.setUpdateRule((String) row.get("UPDATE_RULE"));
+                    newRel.setDeleteRule((String) row.get("DELETE_RULE"));
+                    newRel.setDirection(direction);
+                    return newRel;
+                });
 
+                // Add column mapping
                 rel.addColumnMapping(
                         (String) row.get("SOURCE_COLUMN"),
                         (String) row.get("TARGET_COLUMN")
                 );
-
-                relationshipsMap.put(directionKey, rel);
             }
 
-            // Process incoming relationships
-            List<Map<String, Object>> incomingResults = jdbc.queryForList(incomingRelationshipsSql, tableName, tableName);
-            logger.info("Found {} incoming relationships", incomingResults.size());
-
-            for (Map<String, Object> row : incomingResults) {
-                String constraintName = (String) row.get("CONSTRAINT_NAME");
-                String directionKey = "INCOMING_" + constraintName;
-
-                logger.info("Processing incoming relationship: {}, source: {}, target: {}",
-                        constraintName, row.get("SOURCE_TABLE"), row.get("TARGET_TABLE"));
-
-                RelationshipMetadata rel = new RelationshipMetadata();
-                rel.setName(constraintName);
-                rel.setConstraintType((String) row.get("CONSTRAINT_TYPE"));
-                rel.setSourceTable((String) row.get("SOURCE_TABLE"));
-                rel.setTargetTable((String) row.get("TARGET_TABLE"));
-                rel.setTargetSchema((String) row.get("TARGET_SCHEMA"));
-                rel.setUpdateRule((String) row.get("UPDATE_RULE"));
-                rel.setDeleteRule((String) row.get("DELETE_RULE"));
-                rel.setDirection("INCOMING");
-
-                rel.addColumnMapping(
-                        (String) row.get("SOURCE_COLUMN"),
-                        (String) row.get("TARGET_COLUMN")
-                );
-
-                relationshipsMap.put(directionKey, rel);
-            }
-
-            logger.info("Total relationships found: {}", relationshipsMap.size());
             return new ArrayList<>(relationshipsMap.values());
         });
     }
 
     /**
-     * Helper method to process relationship query results.
-     *
-     * @param rs Result set containing relationship data
-     * @param relationshipsMap Map to store relationship objects
-     * @throws SQLException On SQL error
+     * Optimized implementation for MySQL-specific prepared statements.
+     * Uses MySQL's streaming mode for efficient large result set handling.
      */
-    private void processRelationships(ResultSet rs, Map<String, RelationshipMetadata> relationshipsMap) throws SQLException {
-        while (rs.next()) {
-            String constraintName = rs.getString("CONSTRAINT_NAME");
-            String directionKey = rs.getString("RELATIONSHIP_DIRECTION") + "_" + constraintName;
-
-            // Check if relationship exists already
-            RelationshipMetadata relationship;
-            if (!relationshipsMap.containsKey(directionKey)) {
-                // Create new relationship
-                RelationshipMetadata rel = new RelationshipMetadata();
-                rel.setName(constraintName);
-                rel.setConstraintType(rs.getString("CONSTRAINT_TYPE"));
-                rel.setSourceTable(rs.getString("SOURCE_TABLE"));
-                rel.setTargetTable(rs.getString("TARGET_TABLE"));
-                rel.setTargetSchema(rs.getString("TARGET_SCHEMA"));
-                rel.setUpdateRule(rs.getString("UPDATE_RULE"));
-                rel.setDeleteRule(rs.getString("DELETE_RULE"));
-                rel.setDirection(rs.getString("RELATIONSHIP_DIRECTION"));
-                relationshipsMap.put(directionKey, rel);
-                relationship = rel;
-            } else {
-                // Get existing relationship
-                relationship = relationshipsMap.get(directionKey);
-            }
-
-            // Add the column mapping
-            relationship.addColumnMapping(
-                    rs.getString("SOURCE_COLUMN"),
-                    rs.getString("TARGET_COLUMN")
-            );
-        }
+    @Override
+    protected PreparedStatement prepareSampleTableStatement(Connection connection, String tableName, int limit)
+            throws SQLException {
+        // MySQL-specific optimizations for sampling
+        String sql = String.format("SELECT * FROM %s LIMIT ?", escapeIdentifier(tableName));
+        PreparedStatement stmt = connection.prepareStatement(
+                sql,
+                ResultSet.TYPE_FORWARD_ONLY,
+                ResultSet.CONCUR_READ_ONLY
+        );
+        // Set to streaming mode for MySQL (server-side cursors)
+        stmt.setFetchSize(Integer.MIN_VALUE);
+        stmt.setInt(1, limit);
+        return stmt;
     }
 
     /**
-     * Escapes an SQL identifier to prevent SQL injection.
-     * This method has been replaced by the one in DatabaseUtils.
-     *
-     * @param identifier Identifier to escape
-     * @return Escaped identifier
+     * Optimized implementation for MySQL-specific column sampling.
      */
     @Override
-    protected String escapeIdentifier(String identifier) {
-        // MySQL uses backticks for identifiers
-        return DatabaseUtils.escapeIdentifier(identifier, "mysql");
+    protected PreparedStatement prepareSampleColumnStatement(Connection connection, String tableName,
+                                                             String columnName, int limit)
+            throws SQLException {
+        String sql = String.format("SELECT %s FROM %s LIMIT ?",
+                escapeIdentifier(columnName),
+                escapeIdentifier(tableName));
+        PreparedStatement stmt = connection.prepareStatement(
+                sql,
+                ResultSet.TYPE_FORWARD_ONLY,
+                ResultSet.CONCUR_READ_ONLY
+        );
+        // Set to streaming mode for MySQL
+        stmt.setFetchSize(Integer.MIN_VALUE);
+        stmt.setInt(1, limit);
+        return stmt;
     }
 }

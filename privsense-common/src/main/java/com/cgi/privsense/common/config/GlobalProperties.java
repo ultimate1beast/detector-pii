@@ -2,7 +2,6 @@ package com.cgi.privsense.common.config;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.boot.context.properties.NestedConfigurationProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
@@ -11,7 +10,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Global properties for the application.
- * This class centralizes all application properties in one place.
+ * Simplified and flattened structure for easier configuration and maintenance.
  */
 @Data
 @Component
@@ -19,46 +18,35 @@ import java.util.concurrent.TimeUnit;
 public class GlobalProperties {
 
     /**
-     * Database scanner configuration.
+     * Database scanner driver configuration.
      */
-    @NestedConfigurationProperty
-    private final DbScannerProperties dbScanner = new DbScannerProperties();
+    private DriverConfig drivers = new DriverConfig();
 
     /**
-     * Database scanner properties.
+     * Database scanner queue configuration.
      */
-    @Data
-    public static class DbScannerProperties {
-        /**
-         * Driver configuration.
-         */
-        @NestedConfigurationProperty
-        private final DriverProperties drivers = new DriverProperties();
-
-        /**
-         * Queue configuration.
-         */
-        @NestedConfigurationProperty
-        private final QueueProperties queue = new QueueProperties();
-
-        /**
-         * Thread configuration.
-         */
-        @NestedConfigurationProperty
-        private final ThreadProperties threads = new ThreadProperties();
-
-        /**
-         * Sampling configuration.
-         */
-        @NestedConfigurationProperty
-        private final SamplingProperties sampling = new SamplingProperties();
-    }
+    private QueueConfig queue = new QueueConfig();
 
     /**
-     * Driver configuration properties.
+     * Database scanner thread configuration.
+     */
+    private ThreadConfig threads = new ThreadConfig();
+
+    /**
+     * Database sampling configuration.
+     */
+    private SamplingConfig sampling = new SamplingConfig();
+
+    /**
+     * Connection pool configuration.
+     */
+    private ConnectionPoolConfig connectionPool = new ConnectionPoolConfig();
+
+    /**
+     * Driver configuration.
      */
     @Data
-    public static class DriverProperties {
+    public static class DriverConfig {
         /**
          * Directory where downloaded drivers are stored.
          */
@@ -77,10 +65,10 @@ public class GlobalProperties {
     }
 
     /**
-     * Queue configuration properties.
+     * Queue configuration.
      */
     @Data
-    public static class QueueProperties {
+    public static class QueueConfig {
         /**
          * Capacity of the queue.
          */
@@ -103,10 +91,10 @@ public class GlobalProperties {
     }
 
     /**
-     * Thread configuration properties.
+     * Thread configuration.
      */
     @Data
-    public static class ThreadProperties {
+    public static class ThreadConfig {
         /**
          * Maximum pool size.
          */
@@ -124,10 +112,10 @@ public class GlobalProperties {
     }
 
     /**
-     * Sampling configuration properties.
+     * Sampling configuration.
      */
     @Data
-    public static class SamplingProperties {
+    public static class SamplingConfig {
         /**
          * Timeout for sampling operations.
          */
@@ -142,5 +130,66 @@ public class GlobalProperties {
          * Whether to use the queue for sampling.
          */
         private boolean useQueue = true;
+
+        /**
+         * Default sampling size.
+         */
+        private int defaultSampleSize = 100;
+
+        /**
+         * Maximum allowed sample size.
+         */
+        private int maxSampleSize = 10000;
+    }
+
+    /**
+     * Connection pool configuration.
+     */
+    @Data
+    public static class ConnectionPoolConfig {
+        /**
+         * Default maximum pool size.
+         */
+        private int defaultMaxPoolSize = 10;
+
+        /**
+         * Default minimum idle connections.
+         */
+        private int defaultMinIdle = 2;
+
+        /**
+         * Default connection timeout in milliseconds.
+         */
+        private int defaultConnectionTimeout = 30000;
+
+        /**
+         * Default idle timeout in milliseconds.
+         */
+        private int defaultIdleTimeout = 60000;
+
+        /**
+         * Default maximum lifetime in milliseconds.
+         */
+        private int defaultMaxLifetime = 1800000;
+
+        /**
+         * Default leak detection threshold in milliseconds.
+         */
+        private int defaultLeakDetectionThreshold = 60000;
+    }
+
+    /**
+     * Get database scanner configuration.
+     * Convenience method for backward compatibility.
+     *
+     * @return A map with references to all database scanner config objects
+     */
+    public Map<String, Object> getDbScanner() {
+        Map<String, Object> dbScanner = new HashMap<>();
+        dbScanner.put("drivers", drivers);
+        dbScanner.put("queue", queue);
+        dbScanner.put("threads", threads);
+        dbScanner.put("sampling", sampling);
+        return dbScanner;
     }
 }

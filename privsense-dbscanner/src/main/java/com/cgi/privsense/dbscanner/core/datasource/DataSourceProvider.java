@@ -15,7 +15,7 @@ public interface DataSourceProvider {
      *
      * @param name Name of the data source
      * @return The data source
-     * @throws com.cgi.privsense.dbscanner.exception.DataSourceException if data source not found
+     * @throws com.cgi.privsense.dbscanner.exception.DatabaseOperationException if data source not found
      */
     DataSource getDataSource(String name);
 
