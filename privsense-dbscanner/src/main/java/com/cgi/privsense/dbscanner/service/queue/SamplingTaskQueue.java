@@ -33,6 +33,7 @@ public class SamplingTaskQueue implements DisposableBean {
      * @param properties Global application properties
      */
     public SamplingTaskQueue(GlobalProperties properties) {
+        // Use the new properties structure
         int queueCapacity = properties.getDbScanner().getQueue().getCapacity();
         this.taskQueue = new LinkedBlockingQueue<>(queueCapacity);
         this.pollTimeout = properties.getDbScanner().getQueue().getPollTimeout();

@@ -14,6 +14,7 @@
 	<modules>
 		<module>privsense-common</module>
 		<module>privsense-dbscanner</module>
+		<module>privsense-piidetector</module>
 		<module>privsense-web</module>
 	</modules>
 
@@ -22,7 +23,7 @@
 		<spring-boot.version>3.4.3</spring-boot.version>
 		<springdoc-openapi.version>2.8.5</springdoc-openapi.version>
 		<caffeine.version>3.1.8</caffeine.version>
-		<lombok.version>1.18.30</lombok.version>  <!-- Ajoutez cette ligne -->
+		<lombok.version>1.18.30</lombok.version>
 		<maven.compiler.source>${java.version}</maven.compiler.source>
 		<maven.compiler.target>${java.version}</maven.compiler.target>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -48,6 +49,11 @@
 			<dependency>
 				<groupId>com.cgi.privsense</groupId>
 				<artifactId>privsense-dbscanner</artifactId>
+				<version>${project.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>com.cgi.privsense</groupId>
+				<artifactId>privsense-piidetector</artifactId>
 				<version>${project.version}</version>
 			</dependency>
 

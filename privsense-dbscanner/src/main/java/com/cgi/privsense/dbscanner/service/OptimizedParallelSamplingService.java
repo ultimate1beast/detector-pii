@@ -70,10 +70,11 @@ public class OptimizedParallelSamplingService {
         this.dataSourceProvider = dataSourceProvider;
         this.scannerFactory = scannerFactory;
 
-        // Get all properties from centralized configuration
-        this.maxThreads = properties.getDbScanner().getThreads().getMaxPoolSize();
-        this.defaultTimeout = properties.getDbScanner().getSampling().getTimeout();
-        this.timeoutUnit = properties.getDbScanner().getSampling().getTimeoutUnit();
+        // Directly access properties from the injected GlobalProperties object
+        // using the specific config classes and their getters.
+        this.maxThreads = properties.getThreads().getMaxPoolSize(); // Correct access
+        this.defaultTimeout = properties.getSampling().getTimeout(); // Correct access
+        this.timeoutUnit = properties.getSampling().getTimeoutUnit(); // Correct access
 
         // Create a thread pool with custom thread factory
         this.executorService = Executors.newThreadPerTaskExecutor(
@@ -469,5 +470,4 @@ public class OptimizedParallelSamplingService {
             executorService.shutdownNow();
         }
     }
-
 }

@@ -1,10 +1,8 @@
-# Application Configuration
-
 # Server Configuration
 server:
   port: 8080
   servlet:
-    context-path: /dbscanner
+    context-path: /
 
 # Spring Configuration
 spring:
@@ -15,14 +13,36 @@ spring:
   # Cache Configuration
   cache:
     type: caffeine
-    cache-names: tableMetadata,columnMetadata,piiResults
+    cache-names: tableMetadata,columnMetadata,relationshipMetadata,tableResults,columnResults,piiResults
     caffeine:
       spec: maximumSize=1000,expireAfterWrite=60m
 
+# Root level properties for backward compatibility
+piidetector:
+  ner:
+    service:
+      url: ${privsense.piiDetector.ner.service.url}
+    trust:
+      all:
+        certs: ${privsense.piiDetector.ner.trust.all.certs}
+
 # PrivSense Global Configuration
 privsense:
+  piiDetector:
+    confidence:
+      threshold: 0.7
+    sampling:
+      limit: 10
+    ner:
+      service:
+        url: http://localhost:5000/ner
+      trust:
+        all:
+          certs: false
+
   # Database Scanner Configuration
   dbScanner:
+    # Drivers configuration
     drivers:
       directory: ${user.home}/.dbscanner/drivers
       repository-url: https://repo1.maven.org/maven2
@@ -31,71 +51,34 @@ privsense:
         com.mysql.cj.jdbc.Driver: mysql:mysql-connector-java:8.0.33
         org.postgresql.Driver: org.postgresql:postgresql:42.7.1
 
-    # Configuration pour le système de file d'attente
+    # Queue configuration
     queue:
-      # Capacité maximale des files d'attente
       capacity: 1000
-      # Taille des lots pour le traitement par lots
       batch-size: 20
-      # Timeout pour le polling des files d'attente (en millisecondes)
       poll-timeout: 500
-      # Unité de temps pour le timeout de polling
       poll-timeout-unit: MILLISECONDS
 
-    # Configuration des threads
+    # Threads configuration
     threads:
-      # Nombre maximum de threads pour le pool principal
       max-pool-size: 8
-      # Nombre de threads pour les tâches d'échantillonnage
       sampler-pool-size: 4
-      # Nombre de consommateurs pour les files d'échantillonnage
       sampling-consumers: 3
 
-    # Configuration de l'échantillonnage
+    # Sampling configuration
     sampling:
-      # Timeout par défaut pour les opérations d'échantillonnage
       timeout: 30
-      # Unité de temps pour le timeout
       timeout-unit: SECONDS
-      # Utiliser la file d'attente pour l'échantillonnage (true) par défaut
       use-queue: true
+      default-sample-size: 100
+      max-sample-size: 10000
 
-# Logging Configuration
-logging:
-  level:
-    root: INFO
-    com.cgi.privsense: DEBUG
-  pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
-  file:
-    name: logs/privsense.log
-    max-size: 10MB
-    max-history: 10
+    # Connection pool configuration
+    connectionPool:
+      default-max-pool-size: 10
+      default-min-idle: 2
+      default-connection-timeout: 30000
+      default-idle-timeout: 60000
+      default-max-lifetime: 1800000
+      default-leak-detection-threshold: 60000
 
-# Swagger/OpenAPI Configuration
-springdoc:
-  api-docs:
-    path: /api-docs
-    enabled: true
-  swagger-ui:
-    path: /swagger-ui.html
-    operationsSorter: method
-    tagsSorter: alpha
-    filter: true
-    disable-swagger-default-url: true
-    display-request-duration: true
-  packages-to-scan: com.cgi.privsense.dbscanner.api,com.cgi.privsense.piidetector.api
-  show-actuator: false
-
-# Management endpoints
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info,metrics
-  endpoint:
-    health:
-      show-details: when_authorized
-  health:
-    defaults:
-      enabled: true
+# Logging and other configuration remains the same

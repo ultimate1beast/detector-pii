@@ -3,7 +3,7 @@ package com.cgi.privsense.dbscanner.service.queue;
 import com.cgi.privsense.common.config.GlobalProperties;
 import com.cgi.privsense.common.util.DatabaseUtils;
 import com.cgi.privsense.dbscanner.core.datasource.DataSourceProvider;
-import com.cgi.privsense.dbscanner.exception.SamplingException;
+import com.cgi.privsense.dbscanner.exception.DatabaseOperationException;
 import com.cgi.privsense.dbscanner.model.DataSample;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -52,9 +52,11 @@ public class SamplingTaskProcessor implements DisposableBean {
 
         this.taskQueue = taskQueue;
         this.dataSourceProvider = dataSourceProvider;
-        this.numThreads = properties.getDbScanner().getThreads().getSamplerPoolSize();
-        this.pollTimeout = properties.getDbScanner().getQueue().getPollTimeout();
-        this.pollTimeoutUnit = properties.getDbScanner().getQueue().getPollTimeoutUnit();
+
+        // Access configuration properties directly through their getters
+        this.numThreads = properties.getThreads().getSamplerPoolSize();
+        this.pollTimeout = properties.getQueue().getPollTimeout();
+        this.pollTimeoutUnit = properties.getQueue().getPollTimeoutUnit();
 
         // Create thread pool with custom thread factory
         this.executorService = Executors.newFixedThreadPool(numThreads, r -> {
@@ -147,7 +149,7 @@ public class SamplingTaskProcessor implements DisposableBean {
                 if (task.getTableCallback() != null) {
                     task.getTableCallback().accept(null);
                 }
-                throw new SamplingException("Error sampling table: " + task.getTableName(), e);
+                throw DatabaseOperationException.samplingError("Error sampling table: " + task.getTableName(), e);
             }
         } else if (task.isColumnSamplingTask()) {
             // Process column sampling task
@@ -172,7 +174,7 @@ public class SamplingTaskProcessor implements DisposableBean {
                 if (task.getColumnCallback() != null) {
                     task.getColumnCallback().accept(Collections.emptyList());
                 }
-                throw new SamplingException("Error sampling column: " + task.getTableName() + "." + task.getColumnName(), e);
+                throw DatabaseOperationException.samplingError("Error sampling column: " + task.getTableName() + "." + task.getColumnName(), e);
             }
         } else {
             log.warn("Invalid task type: {}", task);
@@ -216,9 +218,10 @@ public class SamplingTaskProcessor implements DisposableBean {
                 }
             }
 
-            return DataSample.fromRows(tableName, rows);
+            // Utiliser la méthode create() au lieu de fromRows()
+            return DataSample.create(tableName, rows);
         } catch (SQLException e) {
-            throw new SamplingException("Error sampling table: " + tableName, e);
+            throw DatabaseOperationException.samplingError("Error sampling table: " + tableName, e);
         }
     }
 
@@ -251,7 +254,7 @@ public class SamplingTaskProcessor implements DisposableBean {
 
             return values;
         } catch (SQLException e) {
-            throw new SamplingException("Error sampling column: " + tableName + "." + columnName, e);
+            throw DatabaseOperationException.samplingError("Error sampling column: " + tableName + "." + columnName, e);
         }
     }
 
