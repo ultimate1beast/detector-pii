@@ -1,5 +1,6 @@
 package com.cgi.privsense.common.util;
 
+import com.cgi.privsense.common.constants.DatabaseConstants;
 import lombok.experimental.UtilityClass;
 
 /**
@@ -21,11 +22,11 @@ public class DatabaseUtils {
         }
 
         switch (dbType.toLowerCase()) {
-            case "mysql":
+            case DatabaseConstants.DB_TYPE_MYSQL:
                 return "`" + identifier.replace("`", "``") + "`";
-            case "postgresql", "oracle":
+            case DatabaseConstants.DB_TYPE_POSTGRESQL, DatabaseConstants.DB_TYPE_ORACLE:
                 return "\"" + identifier.replace("\"", "\"\"") + "\"";
-            case "sqlserver":
+            case DatabaseConstants.DB_TYPE_SQLSERVER:
                 return "[" + identifier.replace("]", "]]") + "]";
             default:
                 return identifier;
@@ -76,28 +77,28 @@ public class DatabaseUtils {
      * @return JDBC URL
      */
     public String buildJdbcUrl(String dbType, String host, Integer port, String database) {
-        String dbTypeLower = (dbType != null) ? dbType.toLowerCase() : "mysql";
+        String dbTypeLower = (dbType != null) ? dbType.toLowerCase() : DatabaseConstants.DB_TYPE_MYSQL;
 
         return switch (dbTypeLower) {
-            case "mysql" -> String.format(
+            case DatabaseConstants.DB_TYPE_MYSQL -> String.format(
                     "jdbc:mysql://%s:%d/%s",
                     host,
                     port != null ? port : 3306,
                     database
             );
-            case "postgresql" -> String.format(
+            case DatabaseConstants.DB_TYPE_POSTGRESQL -> String.format(
                     "jdbc:postgresql://%s:%d/%s",
                     host,
                     port != null ? port : 5432,
                     database
             );
-            case "oracle" -> String.format(
+            case DatabaseConstants.DB_TYPE_ORACLE -> String.format(
                     "jdbc:oracle:thin:@%s:%d/%s",
                     host,
                     port != null ? port : 1521,
                     database
             );
-            case "sqlserver" -> String.format(
+            case DatabaseConstants.DB_TYPE_SQLSERVER -> String.format(
                     "jdbc:sqlserver://%s:%d;databaseName=%s",
                     host,
                     port != null ? port : 1433,
@@ -114,12 +115,12 @@ public class DatabaseUtils {
      * @return Driver class name
      */
     public String getDriverClassNameForDbType(String dbType) {
-        String type = (dbType != null) ? dbType.toLowerCase() : "mysql";
+        String type = (dbType != null) ? dbType.toLowerCase() : DatabaseConstants.DB_TYPE_MYSQL;
         return switch (type) {
-            case "mysql" -> "com.mysql.cj.jdbc.Driver";
-            case "postgresql" -> "org.postgresql.Driver";
-            case "oracle" -> "oracle.jdbc.OracleDriver";
-            case "sqlserver" -> "com.microsoft.sqlserver.jdbc.SQLServerDriver";
+            case DatabaseConstants.DB_TYPE_MYSQL -> "com.mysql.cj.jdbc.Driver";
+            case DatabaseConstants.DB_TYPE_POSTGRESQL -> "org.postgresql.Driver";
+            case DatabaseConstants.DB_TYPE_ORACLE -> "oracle.jdbc.OracleDriver";
+            case DatabaseConstants.DB_TYPE_SQLSERVER -> "com.microsoft.sqlserver.jdbc.SQLServerDriver";
             default -> throw new IllegalArgumentException("Unsupported database type: " + dbType);
         };
     }

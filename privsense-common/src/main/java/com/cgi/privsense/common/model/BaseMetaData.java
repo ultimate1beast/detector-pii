@@ -32,10 +32,10 @@ public abstract class BaseMetaData implements Serializable {
     protected String comment;
 
     /**
-     * Additional information that does not fit into standard attributes.
-     * Allows extending metadata without modifying the class structure.
-     */
-    protected Map<String, Object> additionalInfo = new HashMap<>();
+ * Additional information that does not fit into standard attributes.
+ * Allows extending metadata without modifying the class structure.
+ */
+protected transient Map<String, Object> additionalInfo = new HashMap<>();
 
     /**
      * Adds additional information to the metadata.

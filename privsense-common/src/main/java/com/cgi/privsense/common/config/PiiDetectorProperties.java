@@ -1,7 +1,7 @@
 package com.cgi.privsense.common.config;
 
 import lombok.Data;
-import org.springframework.boot.context.properties.ConfigurationProperties;
+
 
 /**
  * PII detector configuration properties.

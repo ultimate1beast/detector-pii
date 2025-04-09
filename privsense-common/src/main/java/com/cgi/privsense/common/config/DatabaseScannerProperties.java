@@ -1,11 +1,6 @@
 package com.cgi.privsense.common.config;
 
 import lombok.Data;
-import org.springframework.boot.context.properties.ConfigurationProperties;
-
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Database scanner configuration properties.
