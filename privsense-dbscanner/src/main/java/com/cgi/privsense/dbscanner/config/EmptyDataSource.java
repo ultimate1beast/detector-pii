@@ -35,22 +35,26 @@ public class EmptyDataSource implements DataSource {
         return null;
     }
 
-    /**
+     /**
      * Sets the log writer.
      *
      * @param out Log writer
+     * @throws UnsupportedOperationException Always thrown as this is a placeholder datasource
      */
     @Override
     public void setLogWriter(PrintWriter out) {
+        throw new UnsupportedOperationException("EmptyDataSource doesn't support setting log writer");
     }
 
     /**
      * Sets the login timeout.
      *
      * @param seconds Timeout in seconds
+     * @throws UnsupportedOperationException Always thrown as this is a placeholder datasource
      */
     @Override
     public void setLoginTimeout(int seconds) {
+        throw new UnsupportedOperationException("EmptyDataSource doesn't support setting login timeout");
     }
 
     /**

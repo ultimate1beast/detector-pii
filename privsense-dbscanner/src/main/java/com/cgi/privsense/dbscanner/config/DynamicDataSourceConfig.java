@@ -1,8 +1,7 @@
 package com.cgi.privsense.dbscanner.config;
 
-import com.cgi.privsense.common.config.GlobalProperties;
 import com.cgi.privsense.dbscanner.core.datasource.DataSourceProvider;
-import com.cgi.privsense.dbscanner.core.driver.DriverManager;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -19,18 +18,10 @@ import javax.sql.DataSource;
 @Configuration
 public class DynamicDataSourceConfig {
 
-    private final DriverManager driverManager;
-    private final GlobalProperties properties;
-
     /**
      * Constructor.
-     *
-     * @param driverManager The driver dependency manager
-     * @param properties Global application properties
      */
-    public DynamicDataSourceConfig(DriverManager driverManager, GlobalProperties properties) {
-        this.driverManager = driverManager;
-        this.properties = properties;
+    public DynamicDataSourceConfig() {
         log.info("Initializing DynamicDataSourceConfig");
     }
 
