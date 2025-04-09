@@ -54,7 +54,7 @@ For detailed architecture information, see each module's documentation:
 
 1. **Clone the Repository**
    ```bash
-   git clone https://github.com/your-organization/privsense.git
+   git clone https://fr-gitlab-forge-gto.wse.ent.cginet/bodori/privsense.git
    cd privsense
    ```
 
