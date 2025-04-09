@@ -39,7 +39,6 @@ public class DetectionResultCleaner {
 
         // For each PII type, select the detection with the highest confidence
         for (Map.Entry<PIIType, List<PIITypeDetection>> entry : detectionsByType.entrySet()) {
-            PIIType piiType = entry.getKey();
             List<PIITypeDetection> detections = entry.getValue();
 
             // Find the detection with the highest confidence
@@ -63,7 +62,7 @@ public class DetectionResultCleaner {
             additionalInfo = new HashMap<>();
         }
 
-        ColumnPIIInfo cleanedColumnInfo = ColumnPIIInfo.builder()
+        return ColumnPIIInfo.builder()
                 .columnName(columnInfo.getColumnName())
                 .tableName(columnInfo.getTableName())
                 .columnType(columnInfo.getColumnType())
@@ -71,8 +70,6 @@ public class DetectionResultCleaner {
                 .detections(cleanedDetections)
                 .additionalInfo(additionalInfo)
                 .build();
-
-        return cleanedColumnInfo;
     }
 
     /**

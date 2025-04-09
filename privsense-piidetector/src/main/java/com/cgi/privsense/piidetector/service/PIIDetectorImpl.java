@@ -2,29 +2,29 @@
  * PIIDetectorImpl.java - Main implementation of the PII detector
  */
 package com.cgi.privsense.piidetector.service;
-import com.cgi.privsense.common.config.GlobalProperties;
+
 import com.cgi.privsense.dbscanner.model.ColumnMetadata;
 import com.cgi.privsense.dbscanner.model.TableMetadata;
 import com.cgi.privsense.dbscanner.service.OptimizedParallelSamplingService;
 import com.cgi.privsense.dbscanner.service.ScannerService;
-import com.cgi.privsense.piidetector.api.PIIDetectionStrategy;
+
 import com.cgi.privsense.piidetector.api.PIIDetectionStrategyFactory;
 import com.cgi.privsense.piidetector.api.PIIDetector;
-import com.cgi.privsense.piidetector.api.PIIReportGenerator;
+import com.cgi.privsense.piidetector.api.TablePIIService;
 import com.cgi.privsense.piidetector.exception.PIIDetectionException;
 import com.cgi.privsense.piidetector.model.*;
+import com.cgi.privsense.piidetector.model.enums.PIIType;
+
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.stream.Collectors;
 
 /**
  * Main implementation of the PII detector.
@@ -37,53 +37,60 @@ public class PIIDetectorImpl implements PIIDetector {
 
     private final ScannerService scannerService;
     private final OptimizedParallelSamplingService samplingService;
-    private final PIIDetectionStrategyFactory strategyFactory;
-    private final PIIReportGenerator reportGenerator;
-    private final PIIDetectionPipelineService pipelineService;
+    private final PIIDetectionPipelineCoordinator pipelineCoordinator;
     private final PIIDetectionMetricsCollector metricsCollector;
     private final DetectionResultCleaner resultCleaner;
-    private final GlobalProperties properties;
+    private final PIIDetectionCacheManager cacheManager;
+    private final DetectionResultFactory resultFactory;
+    private final TablePIIService tablePIIService;
 
-    private double confidenceThreshold = 0.7;
-    private int sampleSize = 10;
+    private double confidenceThreshold;
+    private int sampleSize;
     private Map<String, Boolean> activeStrategies = new ConcurrentHashMap<>();
-    private Map<String, Integer> tableSampleSizes = new ConcurrentHashMap<>();
+    private Map<String, Integer> tableSampleSizes;
 
-    @Autowired
     public PIIDetectorImpl(
             ScannerService scannerService,
             OptimizedParallelSamplingService samplingService,
             PIIDetectionStrategyFactory strategyFactory,
-            PIIReportGenerator reportGenerator,
-            PIIDetectionPipelineService pipelineService,
+            PIIDetectionPipelineCoordinator pipelineCoordinator,
             PIIDetectionMetricsCollector metricsCollector,
             DetectionResultCleaner resultCleaner,
-            GlobalProperties properties,
+            PIIDetectionCacheManager cacheManager,
+            DetectionResultFactory resultFactory,
+            TablePIIService tablePIIService,
             @Value("${piidetector.confidence.threshold:0.7}") double confidenceThreshold,
             @Value("${piidetector.sampling.limit:10}") int sampleSize) {
 
         this.scannerService = scannerService;
         this.samplingService = samplingService;
-        this.strategyFactory = strategyFactory;
-        this.reportGenerator = reportGenerator;
-        this.pipelineService = pipelineService;
+        this.pipelineCoordinator = pipelineCoordinator;
         this.metricsCollector = metricsCollector;
         this.resultCleaner = resultCleaner;
-        this.properties = properties;
+        this.cacheManager = cacheManager;
+        this.resultFactory = resultFactory;
+        this.tablePIIService = tablePIIService;
         this.confidenceThreshold = confidenceThreshold;
         this.sampleSize = sampleSize;
 
         // Default: enable all strategies
-        strategyFactory.getAllStrategies().forEach(strategy -> {
-            activeStrategies.put(strategy.getName(), true);
-        });
+        strategyFactory.getAllStrategies().forEach(strategy -> activeStrategies.put(strategy.getName(), true));
 
         log.info("PII Detector initialized");
     }
 
-
     @PostConstruct
-    public void validateConfiguration() {
+    public void initCaches() {
+        // Create and register table sample sizes cache
+        tableSampleSizes = cacheManager.createCache("tableSampleSizesCache");
+
+        // Register active strategies cache
+        cacheManager.registerCache("activeStrategies", activeStrategies);
+
+        validateConfiguration();
+    }
+
+    private void validateConfiguration() {
         if (confidenceThreshold < 0.0 || confidenceThreshold > 1.0) {
             throw PIIDetectionException.configError("Confidence threshold must be between 0.0 and 1.0");
         }
@@ -122,55 +129,9 @@ public class PIIDetectorImpl implements PIIDetector {
     }
 
     @Override
-    @Cacheable(value = "tableResults", key = "#connectionId + ':' + #dbType + ':' + #tableName")
     public TablePIIInfo detectPIIInTable(String connectionId, String dbType, String tableName) {
-        long tableStartTime = System.currentTimeMillis();
-        log.info("Analyzing table: {}", tableName);
-
-        TablePIIInfo tableResult = TablePIIInfo.builder()
-                .tableName(tableName)
-                .columnResults(new ArrayList<>())
-                .build();
-
-        // Get table metadata
-        List<ColumnMetadata> columns = scannerService.scanColumns(dbType, connectionId, tableName);
-
-        // Get the appropriate sample size for this table
-        int effectiveSampleSize = tableSampleSizes.getOrDefault(tableName, sampleSize);
-        log.debug("Using sample size {} for table {}", effectiveSampleSize, tableName);
-
-        // Pre-fetch batches of sample data for efficiency
-        Map<String, List<Object>> columnSamples = fetchColumnSamples(connectionId, dbType, tableName, columns, effectiveSampleSize);
-
-        // Process columns in batch sizes to limit memory usage
-        List<List<ColumnMetadata>> columnBatches = partitionList(columns, 20);
-
-        for (List<ColumnMetadata> batch : columnBatches) {
-            for (ColumnMetadata column : batch) {
-                String columnName = column.getName();
-
-                // Get pre-fetched samples or fetch individually if not available
-                List<Object> samples = columnSamples.getOrDefault(columnName, null);
-                if (samples == null) {
-                    samples = fetchIndividualColumnSample(dbType, connectionId, tableName, columnName, effectiveSampleSize);
-                }
-
-                // Process the column
-                ColumnPIIInfo columnResult = processColumn(connectionId, dbType, tableName, column, samples);
-                tableResult.addColumnResult(columnResult);
-            }
-        }
-
-        log.info("Analysis of table {} completed. Columns containing PII: {}/{}",
-                tableName,
-                tableResult.getColumnResults().stream().filter(ColumnPIIInfo::isPiiDetected).count(),
-                tableResult.getColumnResults().size());
-
-        long tableEndTime = System.currentTimeMillis();
-        long tableProcessingTime = tableEndTime - tableStartTime;
-        metricsCollector.recordTableProcessingTime(tableName, tableProcessingTime);
-
-        return tableResult;
+        // Delegate to the dedicated table service
+        return tablePIIService.detectPIIInTable(connectionId, dbType, tableName);
     }
 
     @Override
@@ -180,14 +141,15 @@ public class PIIDetectorImpl implements PIIDetector {
         // Get column metadata
         ColumnMetadata columnMeta = getColumnMetadata(connectionId, dbType, tableName, columnName);
         if (columnMeta == null) {
-            return createEmptyColumnResult(tableName, columnName);
+            return resultFactory.createEmptyResult(tableName, columnName);
         }
 
         // Get the appropriate sample size for this table
         int effectiveSampleSize = tableSampleSizes.getOrDefault(tableName, sampleSize);
 
         // Sample data
-        List<Object> sampleData = fetchIndividualColumnSample(dbType, connectionId, tableName, columnName, effectiveSampleSize);
+        List<Object> sampleData = fetchIndividualColumnSample(dbType, connectionId, tableName, columnName,
+                effectiveSampleSize);
 
         // Process the column
         return processColumn(connectionId, dbType, tableName, columnMeta, sampleData);
@@ -200,13 +162,10 @@ public class PIIDetectorImpl implements PIIDetector {
         }
         this.confidenceThreshold = confidenceThreshold;
 
-        // Propagate threshold changes
-        pipelineService.setConfidenceThreshold(confidenceThreshold);
-        for (PIIDetectionStrategy strategy : strategyFactory.getAllStrategies()) {
-            strategy.setConfidenceThreshold(confidenceThreshold);
-        }
+        // Centralize threshold propagation through pipeline coordinator only
+        pipelineCoordinator.setConfidenceThreshold(confidenceThreshold);
 
-        // Clear caches
+        // Clear caches since threshold changed
         clearCaches();
     }
 
@@ -235,13 +194,10 @@ public class PIIDetectorImpl implements PIIDetector {
      * Sets an adaptive sample size for a specific table.
      *
      * @param tableName Table name
-     * @param rowCount Approximate row count for sizing calculation
+     * @param rowCount  Approximate row count for sizing calculation
      */
     public void setSampleSizeAdaptive(String tableName, int rowCount) {
-        int adaptiveSize = Math.min(
-                Math.max(5, rowCount / 1000), // Minimum 5, maximum 1/1000th of rows
-                50 // Absolute maximum
-        );
+        int adaptiveSize = Math.clamp(rowCount / 1000, 5, 50);
         tableSampleSizes.put(tableName, adaptiveSize);
     }
 
@@ -250,13 +206,22 @@ public class PIIDetectorImpl implements PIIDetector {
      */
     @CacheEvict(value = "tableResults", allEntries = true)
     public void clearCaches() {
-        if (pipelineService instanceof PIIDetectionPipelineService) {
-            ((PIIDetectionPipelineService) pipelineService).clearCache();
-        }
-        if (strategyFactory instanceof PIIDetectionStrategyFactoryImpl) {
-            ((PIIDetectionStrategyFactoryImpl) strategyFactory).clearCompositeCache();
-        }
+        // Use the cache manager to clear all caches
+        cacheManager.clearAll();
+        // Clear pipeline coordinator cache as well
+        pipelineCoordinator.clearCache();
         log.info("All PII detector caches cleared");
+    }
+
+    /**
+     * Sets the self-reference to this bean.
+     * Used by CachingConfiguration to ensure that internal calls go through the caching proxy.
+     *
+     * @param self The proxied PIIDetector (this bean)
+     */
+    public void setSelf(PIIDetector self) {
+        // Using self as a local variable in this method, no need to store as class field
+        log.debug("Self-reference to PIIDetector received for proper cache handling");
     }
 
     /* Private helper methods */
@@ -271,7 +236,7 @@ public class PIIDetectorImpl implements PIIDetector {
                 .connectionId(connectionId)
                 .dbType(dbType)
                 .tableResults(new ArrayList<>())
-                .piiTypeCounts(new HashMap<>())
+                .piiTypeCounts(new EnumMap<>(PIIType.class))
                 .additionalMetadata(new HashMap<>())
                 .build();
     }
@@ -302,7 +267,8 @@ public class PIIDetectorImpl implements PIIDetector {
 
     private void processTable(PIIDetectionResult result, String connectionId, String dbType, TableMetadata table) {
         try {
-            TablePIIInfo tableResult = detectPIIInTable(connectionId, dbType, table.getName());
+            // Use the dedicated table service - no more direct calls bypassing cache
+            TablePIIInfo tableResult = tablePIIService.detectPIIInTable(connectionId, dbType, table.getName());
             result.addTableResult(tableResult);
             log.info("Processed table: {}, PII detected: {}", table.getName(), tableResult.isHasPii());
         } catch (Exception e) {
@@ -324,26 +290,8 @@ public class PIIDetectorImpl implements PIIDetector {
         metricsCollector.logMetricsReport();
     }
 
-    private Map<String, List<Object>> fetchColumnSamples(String connectionId, String dbType, String tableName,
-                                                         List<ColumnMetadata> columns, int sampleSize) {
-        try {
-            List<String> columnNames = columns.stream()
-                    .map(ColumnMetadata::getName)
-                    .collect(Collectors.toList());
-
-            Map<String, List<Object>> samples = samplingService.sampleColumnsInParallel(
-                    dbType, connectionId, tableName, columnNames, sampleSize);
-
-            log.debug("Sampled {} columns from table {}", samples.size(), tableName);
-            return samples;
-        } catch (Exception e) {
-            log.warn("Error while batch sampling table {}: {}", tableName, e.getMessage());
-            return Collections.emptyMap();
-        }
-    }
-
     private List<Object> fetchIndividualColumnSample(String dbType, String connectionId, String tableName,
-                                                     String columnName, int sampleSize) {
+            String columnName, int sampleSize) {
         try {
             return samplingService.sampleColumn(dbType, connectionId, tableName, columnName, sampleSize);
         } catch (Exception e) {
@@ -353,12 +301,12 @@ public class PIIDetectorImpl implements PIIDetector {
     }
 
     private ColumnPIIInfo processColumn(String connectionId, String dbType, String tableName,
-                                        ColumnMetadata column, List<Object> samples) {
+            ColumnMetadata column, List<Object> samples) {
         String columnName = column.getName();
 
         try {
-            // Process the column
-            ColumnPIIInfo columnResult = pipelineService.analyzeColumn(
+            // Process the column through our new pipeline coordinator instead
+            ColumnPIIInfo columnResult = pipelineCoordinator.analyzeColumn(
                     connectionId, dbType, tableName, columnName, samples);
 
             // Set column type from metadata
@@ -375,16 +323,10 @@ public class PIIDetectorImpl implements PIIDetector {
             log.error("Error while analyzing column {}.{}: {}", tableName, columnName, e.getMessage(), e);
 
             // Return error result
-            ColumnPIIInfo errorResult = ColumnPIIInfo.builder()
-                    .columnName(columnName)
-                    .tableName(tableName)
-                    .columnType(column.getType())
-                    .piiDetected(false)
-                    .detections(new ArrayList<>())
-                    .additionalInfo(new HashMap<>())
-                    .build();
-
+            ColumnPIIInfo errorResult = resultFactory.createEmptyResult(tableName, columnName);
+            errorResult.setColumnType(column.getType());
             errorResult.getAdditionalInfo().put("error", e.getMessage());
+
             return errorResult;
         }
     }
@@ -400,16 +342,6 @@ public class PIIDetectorImpl implements PIIDetector {
             log.warn("Error getting column metadata for {}.{}: {}", tableName, columnName, e.getMessage());
             return null;
         }
-    }
-
-    private ColumnPIIInfo createEmptyColumnResult(String tableName, String columnName) {
-        return ColumnPIIInfo.builder()
-                .columnName(columnName)
-                .tableName(tableName)
-                .piiDetected(false)
-                .detections(new ArrayList<>())
-                .additionalInfo(new HashMap<>())
-                .build();
     }
 
     protected void configureAdaptiveSampleSizes(String connectionId, String dbType, List<TableMetadata> tables) {

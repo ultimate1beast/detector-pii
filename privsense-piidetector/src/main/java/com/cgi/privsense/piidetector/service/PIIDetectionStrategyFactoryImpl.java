@@ -9,14 +9,16 @@ import com.cgi.privsense.piidetector.strategy.CompositePIIDetectionStrategy;
 import com.cgi.privsense.piidetector.strategy.HeuristicNameStrategy;
 import com.cgi.privsense.piidetector.strategy.NERModelStrategy;
 import com.cgi.privsense.piidetector.strategy.RegexPatternStrategy;
+
+import jakarta.annotation.PostConstruct;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,16 +32,22 @@ public class PIIDetectionStrategyFactoryImpl implements PIIDetectionStrategyFact
     private static final Logger log = LoggerFactory.getLogger(PIIDetectionStrategyFactoryImpl.class);
 
     private final Map<String, PIIDetectionStrategy> strategies = new ConcurrentHashMap<>();
+    private final PIIDetectionCacheManager cacheManager;
+    private final DetectionResultFactory resultFactory;
 
-    // Cache for composite strategies to avoid recreation
-    private final Map<String, PIIDetectionStrategy> compositeStrategiesCache = new ConcurrentHashMap<>();
+    // Cache for composite strategies
+    private Map<String, PIIDetectionStrategy> compositeStrategiesCache;
 
-    @Autowired
     public PIIDetectionStrategyFactoryImpl(
             HeuristicNameStrategy heuristicStrategy,
             RegexPatternStrategy regexStrategy,
             NERModelStrategy nerStrategy,
-            CompositePIIDetectionStrategy compositeStrategy) {
+            CompositePIIDetectionStrategy compositeStrategy,
+            PIIDetectionCacheManager cacheManager,
+            DetectionResultFactory resultFactory) {
+
+        this.cacheManager = cacheManager;
+        this.resultFactory = resultFactory;
 
         // Register available strategies
         strategies.put(heuristicStrategy.getName(), heuristicStrategy);
@@ -47,10 +55,24 @@ public class PIIDetectionStrategyFactoryImpl implements PIIDetectionStrategyFact
         strategies.put(nerStrategy.getName(), nerStrategy);
         strategies.put(compositeStrategy.getName(), compositeStrategy);
 
-        // The composite strategy is no longer automatically configured with all strategies
-        // in this pipeline approach, but kept for compatibility with existing code
-
         log.info("PII detection strategy factory initialized with {} strategies", strategies.size());
+    }
+
+    @PostConstruct
+    public void init() {
+        // Create and register the composite strategies cache
+        compositeStrategiesCache = cacheManager.createCache("compositeStrategiesCache");
+
+        // Register the strategies cache
+        cacheManager.registerCache("strategies", strategies);
+
+        // Set cache manager and result factory in all strategies
+        for (PIIDetectionStrategy strategy : strategies.values()) {
+            if (strategy instanceof CompositePIIDetectionStrategy compositePiiDetectionStrategy) {
+                compositePiiDetectionStrategy.setCacheManager(cacheManager);
+                compositePiiDetectionStrategy.setResultFactory(resultFactory);
+            }
+        }
     }
 
     @Override
@@ -74,7 +96,7 @@ public class PIIDetectionStrategyFactoryImpl implements PIIDetectionStrategyFact
         Collections.sort(sortedNames);
 
         // Create cache key
-        String cacheKey = String.join("_", sortedNames);
+        String cacheKey = cacheManager.generateCacheKey(sortedNames.toArray(new String[0]));
 
         // Check cache first
         if (compositeStrategiesCache.containsKey(cacheKey)) {
@@ -83,6 +105,10 @@ public class PIIDetectionStrategyFactoryImpl implements PIIDetectionStrategyFact
 
         // Create new composite strategy
         CompositePIIDetectionStrategy composite = new CompositePIIDetectionStrategy();
+
+        // Set cache manager and result factory
+        composite.setCacheManager(cacheManager);
+        composite.setResultFactory(resultFactory);
 
         for (String name : sortedNames) {
             PIIDetectionStrategy strategy = createStrategy(name);
@@ -99,6 +125,8 @@ public class PIIDetectionStrategyFactoryImpl implements PIIDetectionStrategyFact
      * Clears the composite strategies cache.
      */
     public void clearCompositeCache() {
-        compositeStrategiesCache.clear();
+        if (compositeStrategiesCache != null) {
+            compositeStrategiesCache.clear();
+        }
     }
 }
