@@ -61,7 +61,7 @@ public class SamplingTaskProcessor implements DisposableBean {
         // Create thread pool with custom thread factory
         this.executorService = Executors.newFixedThreadPool(numThreads, r -> {
             Thread t = new Thread(r);
-            t.setName("sampler-" + t.getId());
+            t.setName("sampler-" + t.threadId());
             t.setDaemon(true);
             return t;
         });
@@ -87,29 +87,25 @@ public class SamplingTaskProcessor implements DisposableBean {
     private void processTasksLoop() {
         activeThreadCount.incrementAndGet();
         try {
-            while (!Thread.currentThread().isInterrupted()) {
+            boolean shouldContinue = true;
+            while (!Thread.currentThread().isInterrupted() && shouldContinue) {
                 try {
                     // Take a task from the queue
                     SamplingTask task = taskQueue.takeTask(pollTimeout, pollTimeoutUnit);
 
-                    if (task == null) {
-                        // No task available, check if we should continue
-                        if (!taskQueue.hasActiveTasks() && executorService.isShutdown()) {
-                            // No more tasks and we're shutting down
-                            break;
-                        }
-                        // Otherwise, continue polling
-                        continue;
+                    if (task != null) {
+                        // Process the task
+                        processTask(task);
+                        processedTaskCount.incrementAndGet();
+                    } else if (!taskQueue.hasActiveTasks() && executorService.isShutdown()) {
+                        // No more tasks and we're shutting down
+                        shouldContinue = false;
                     }
-
-                    // Process the task
-                    processTask(task);
-                    processedTaskCount.incrementAndGet();
-
+                    // Otherwise, continue polling
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     log.debug("Consumer thread interrupted, exiting loop");
-                    break;
+                    shouldContinue = false;
                 } catch (Exception e) {
                     failedTaskCount.incrementAndGet();
                     log.error("Error processing sampling task: {}", e.getMessage(), e);
@@ -129,56 +125,105 @@ public class SamplingTaskProcessor implements DisposableBean {
      */
     private void processTask(SamplingTask task) {
         if (task.isTableSamplingTask()) {
-            // Process table sampling task
-            try {
-                DataSample sample = sampleTable(
-                        task.getDbType(),
-                        task.getConnectionId(),
-                        task.getTableName(),
-                        task.getLimit());
-
-                // Invoke callback
-                if (task.getTableCallback() != null) {
-                    task.getTableCallback().accept(sample);
-                }
-
-                log.debug("Completed table sampling task: {}", task.getTableName());
-            } catch (Exception e) {
-                log.error("Error sampling table {}: {}", task.getTableName(), e.getMessage(), e);
-                // Call callback with null to prevent hanging
-                if (task.getTableCallback() != null) {
-                    task.getTableCallback().accept(null);
-                }
-                throw DatabaseOperationException.samplingError("Error sampling table: " + task.getTableName(), e);
-            }
+            processTableSamplingTask(task);
         } else if (task.isColumnSamplingTask()) {
-            // Process column sampling task
-            try {
-                List<Object> samples = sampleColumn(
-                        task.getDbType(),
-                        task.getConnectionId(),
-                        task.getTableName(),
-                        task.getColumnName(),
-                        task.getLimit());
-
-                // Invoke callback
-                if (task.getColumnCallback() != null) {
-                    task.getColumnCallback().accept(samples);
-                }
-
-                log.debug("Completed column sampling task: {}.{}", task.getTableName(), task.getColumnName());
-            } catch (Exception e) {
-                log.error("Error sampling column {}.{}: {}",
-                        task.getTableName(), task.getColumnName(), e.getMessage(), e);
-                // Call callback with empty list to prevent hanging
-                if (task.getColumnCallback() != null) {
-                    task.getColumnCallback().accept(Collections.emptyList());
-                }
-                throw DatabaseOperationException.samplingError("Error sampling column: " + task.getTableName() + "." + task.getColumnName(), e);
-            }
+            processColumnSamplingTask(task);
         } else {
             log.warn("Invalid task type: {}", task);
         }
+    }
+    
+    /**
+     * Processes a table sampling task.
+     *
+     * @param task Table sampling task
+     */
+    private void processTableSamplingTask(SamplingTask task) {
+        try {
+            DataSample sample = sampleTable(
+                    task.getDbType(),
+                    task.getConnectionId(),
+                    task.getTableName(),
+                    task.getLimit());
+
+            // Invoke callback
+            if (task.getTableCallback() != null) {
+                task.getTableCallback().accept(sample);
+            }
+
+            log.debug("Completed table sampling task: {}", task.getTableName());
+        } catch (Exception e) {
+            handleTableSamplingError(task, e);
+        }
+    }
+    
+    /**
+     * Handles errors in table sampling tasks.
+     *
+     * @param task Table sampling task
+     * @param e Exception
+     */
+    private void handleTableSamplingError(SamplingTask task, Exception e) {
+        // Log exception with detailed context and message
+        log.error("Error sampling table {}: table sampling failed - {}", 
+                task.getTableName(), e.getMessage(), e);
+        
+        // Call callback with null to prevent hanging
+        if (task.getTableCallback() != null) {
+            task.getTableCallback().accept(null);
+        }
+        
+        // Rethrow with context information
+        throw DatabaseOperationException.samplingError(
+                String.format("Error sampling table '%s' from connection '%s': %s", 
+                        task.getTableName(), task.getConnectionId(), e.getMessage()), e);
+    }
+    
+    /**
+     * Processes a column sampling task.
+     *
+     * @param task Column sampling task
+     */
+    private void processColumnSamplingTask(SamplingTask task) {
+        try {
+            List<Object> samples = sampleColumn(
+                    task.getDbType(),
+                    task.getConnectionId(),
+                    task.getTableName(),
+                    task.getColumnName(),
+                    task.getLimit());
+
+            // Invoke callback
+            if (task.getColumnCallback() != null) {
+                task.getColumnCallback().accept(samples);
+            }
+
+            log.debug("Completed column sampling task: {}.{}", task.getTableName(), task.getColumnName());
+        } catch (Exception e) {
+            handleColumnSamplingError(task, e);
+        }
+    }
+    
+    /**
+     * Handles errors in column sampling tasks.
+     *
+     * @param task Column sampling task
+     * @param e Exception
+     */
+    private void handleColumnSamplingError(SamplingTask task, Exception e) {
+        // Log exception with detailed context and message
+        log.error("Error sampling column {}.{}: column sampling failed - {}", 
+                task.getTableName(), task.getColumnName(), e.getMessage(), e);
+        
+        // Call callback with empty list to prevent hanging
+        if (task.getColumnCallback() != null) {
+            task.getColumnCallback().accept(Collections.emptyList());
+        }
+        
+        // Rethrow with context information
+        throw DatabaseOperationException.samplingError(
+                String.format("Error sampling column '%s.%s' from connection '%s': %s", 
+                        task.getTableName(), task.getColumnName(), task.getConnectionId(), e.getMessage()), e);
     }
 
     /**
@@ -210,7 +255,7 @@ public class SamplingTaskProcessor implements DisposableBean {
                 }
 
                 while (rs.next()) {
-                    Map<String, Object> row = new HashMap<>(columnCount);
+                    Map<String, Object> row = HashMap.newHashMap(columnCount);
                     for (int i = 0; i < columnCount; i++) {
                         row.put(columnNames[i], rs.getObject(i + 1));
                     }
