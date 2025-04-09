@@ -14,8 +14,8 @@ import java.util.regex.Pattern;
 
 @Component
 public class HeuristicNameStrategy extends AbstractPIIDetectionStrategy {
-    private static final Map<PIIType, List<String>> NAME_PATTERNS = new HashMap<>();
-    private static final Map<PIIType, Pattern> REGEX_NAME_PATTERNS = new HashMap<>();
+    private static final Map<PIIType, List<String>> NAME_PATTERNS = new EnumMap<>(PIIType.class);
+    private static final Map<PIIType, Pattern> REGEX_NAME_PATTERNS = new EnumMap<>(PIIType.class);
 
     // Cache for normalized column names
     private final Map<String, String> normalizedNameCache = new ConcurrentHashMap<>();
@@ -99,14 +99,10 @@ public class HeuristicNameStrategy extends AbstractPIIDetectionStrategy {
             Pattern pattern = entry.getValue();
 
             if (pattern.matcher(normalizedName).matches()) {
-                // Higher confidence for regex pattern matches
                 result.addDetection(createDetection(
                         piiType,
                         0.85,
                         DetectionMethod.HEURISTIC_NAME_BASED.name()));
-
-                // Skip exact matches for this type
-                continue;
             }
         }
 

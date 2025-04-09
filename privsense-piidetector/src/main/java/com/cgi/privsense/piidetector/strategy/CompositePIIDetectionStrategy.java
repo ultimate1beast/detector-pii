@@ -11,7 +11,7 @@ import com.cgi.privsense.piidetector.model.PIITypeDetection;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -43,14 +43,9 @@ public class CompositePIIDetectionStrategy extends AbstractPIIDetectionStrategy 
 
     @Override
     public ColumnPIIInfo detectColumnPII(String connectionId, String dbType, String tableName,
-                                         String columnName, List<Object> sampleData) {
+            String columnName, List<Object> sampleData) {
         // Generate cache key
-        String cacheKey = strategies.stream()
-                .map(PIIDetectionStrategy::getName)
-                .sorted()
-                .reduce("", (a, b) -> a + ":" + b) + ":" +
-                dbType + ":" + tableName + ":" + columnName + ":" +
-                (sampleData != null ? sampleData.hashCode() : "null");
+        String cacheKey = generateCacheKey(dbType, tableName, columnName, sampleData);
 
         // Check cache first
         if (resultCache.containsKey(cacheKey)) {
@@ -64,51 +59,97 @@ public class CompositePIIDetectionStrategy extends AbstractPIIDetectionStrategy 
                 .detections(new ArrayList<>())
                 .build();
 
-        // Apply each strategy
-        for (PIIDetectionStrategy strategy : strategies) {
-            boolean hasMetadata = true;
-            boolean hasSampleData = sampleData != null && !sampleData.isEmpty();
+        // Apply each strategy and collect results
+        Map<PIIType, List<PIITypeDetection>> detectionsByType = collectStrategyResults(
+                connectionId, dbType, tableName, columnName, sampleData);
 
-            if (strategy.isApplicable(hasMetadata, hasSampleData)) {
-                ColumnPIIInfo strategyResult = strategy.detectColumnPII(
-                        connectionId, dbType, tableName, columnName, sampleData);
-
-                // Merge results with a voting approach
-                if (strategyResult.isPiiDetected()) {
-                    // Aggregate detections by PII type
-                    Map<PIIType, List<PIITypeDetection>> detectionsByType = new HashMap<>();
-
-                    for (PIITypeDetection detection : strategyResult.getDetections()) {
-                        detectionsByType.computeIfAbsent(detection.getPiiType(), k -> new ArrayList<>())
-                                .add(detection);
-                    }
-
-                    // Calculate average confidence for each PII type
-                    for (Map.Entry<PIIType, List<PIITypeDetection>> entry : detectionsByType.entrySet()) {
-                        PIIType piiType = entry.getKey();
-                        List<PIITypeDetection> detections = entry.getValue();
-
-                        double avgConfidence = detections.stream()
-                                .mapToDouble(PIITypeDetection::getConfidence)
-                                .average()
-                                .orElse(0.0);
-
-                        // If average confidence is sufficient, add a detection
-                        if (avgConfidence >= confidenceThreshold) {
-                            result.addDetection(createDetection(
-                                    piiType,
-                                    avgConfidence,
-                                    DetectionMethod.COMPOSITE.name()));
-                        }
-                    }
-                }
-            }
-        }
+        // Process aggregated results
+        processAggregatedResults(detectionsByType, result);
 
         // Store in cache
         resultCache.put(cacheKey, result);
 
         return result;
+    }
+
+    /**
+     * Generates a cache key based on strategies and input parameters.
+     */
+    private String generateCacheKey(String dbType, String tableName, String columnName, List<Object> sampleData) {
+        String strategiesKey = strategies.stream()
+                .map(PIIDetectionStrategy::getName)
+                .sorted()
+                .reduce("", (a, b) -> a + ":" + b);
+
+        return strategiesKey + ":" + dbType + ":" + tableName + ":" + columnName + ":" +
+                (sampleData != null ? sampleData.hashCode() : "null");
+    }
+
+    /**
+     * Collects and aggregates results from all applicable strategies.
+     */
+    private Map<PIIType, List<PIITypeDetection>> collectStrategyResults(String connectionId, String dbType,
+            String tableName, String columnName,
+            List<Object> sampleData) {
+        boolean hasSampleData = sampleData != null && !sampleData.isEmpty();
+        boolean hasMetadata = true;
+
+        Map<PIIType, List<PIITypeDetection>> detectionsByType = new EnumMap<>(PIIType.class);
+
+        for (PIIDetectionStrategy strategy : strategies) {
+            if (strategy.isApplicable(hasMetadata, hasSampleData)) {
+                ColumnPIIInfo strategyResult = strategy.detectColumnPII(
+                        connectionId, dbType, tableName, columnName, sampleData);
+
+                if (strategyResult.isPiiDetected()) {
+                    aggregateDetections(strategyResult.getDetections(), detectionsByType);
+                }
+            }
+        }
+
+        return detectionsByType;
+    }
+
+    /**
+     * Aggregates detections by PII type.
+     */
+    private void aggregateDetections(List<PIITypeDetection> detections,
+            Map<PIIType, List<PIITypeDetection>> detectionsByType) {
+        for (PIITypeDetection detection : detections) {
+            PIIType piiType = detection.getPiiType();
+            detectionsByType.computeIfAbsent(piiType, k -> new ArrayList<>()).add(detection);
+        }
+    }
+
+    /**
+     * Processes aggregated results and adds detections to the result when
+     * confidence is sufficient.
+     */
+    private void processAggregatedResults(Map<PIIType, List<PIITypeDetection>> detectionsByType,
+            ColumnPIIInfo result) {
+        for (Map.Entry<PIIType, List<PIITypeDetection>> entry : detectionsByType.entrySet()) {
+            PIIType piiType = entry.getKey();
+            List<PIITypeDetection> detections = entry.getValue();
+
+            double avgConfidence = calculateAverageConfidence(detections);
+
+            if (avgConfidence >= confidenceThreshold) {
+                result.addDetection(createDetection(
+                        piiType,
+                        avgConfidence,
+                        DetectionMethod.COMPOSITE.name()));
+            }
+        }
+    }
+
+    /**
+     * Calculates average confidence from a list of detections.
+     */
+    private double calculateAverageConfidence(List<PIITypeDetection> detections) {
+        return detections.stream()
+                .mapToDouble(PIITypeDetection::getConfidence)
+                .average()
+                .orElse(0.0);
     }
 
     @Override

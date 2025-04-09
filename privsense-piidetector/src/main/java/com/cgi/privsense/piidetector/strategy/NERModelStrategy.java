@@ -9,12 +9,12 @@ import com.cgi.privsense.piidetector.model.enums.PIIType;
 import com.cgi.privsense.piidetector.service.NERServiceClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+
 import org.springframework.stereotype.Component;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
+
 
 /**
  * Strategy using an external NER (Named Entity Recognition) service
@@ -22,7 +22,7 @@ import java.util.stream.Collectors;
  */
 @Component
 public class NERModelStrategy extends AbstractPIIDetectionStrategy {
-    private static final Logger log = LoggerFactory.getLogger(NERModelStrategy.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(NERModelStrategy.class);
 
     private final NERServiceClient nerServiceClient;
 
@@ -37,7 +37,7 @@ public class NERModelStrategy extends AbstractPIIDetectionStrategy {
     // Minimum number of samples to use NER (to avoid overhead for small datasets)
     private static final int MIN_SAMPLES_FOR_NER = 3;
 
-    @Autowired
+    
     public NERModelStrategy(NERServiceClient nerServiceClient) {
         this.nerServiceClient = nerServiceClient;
     }
@@ -52,7 +52,7 @@ public class NERModelStrategy extends AbstractPIIDetectionStrategy {
                                          String columnName, List<Object> sampleData) {
         // Check service availability before proceeding
         if (!isServiceAvailable()) {
-            log.warn("NER service not available, skipping NER analysis for {}.{}", tableName, columnName);
+            LOGGER.warn("NER service not available, skipping NER analysis for {}.{}", tableName, columnName);
             return ColumnPIIInfo.builder()
                     .columnName(columnName)
                     .tableName(tableName)
@@ -88,7 +88,7 @@ public class NERModelStrategy extends AbstractPIIDetectionStrategy {
                     .map(Object::toString)
                     .filter(s -> !s.trim().isEmpty())
                     .map(value -> String.format("The value of field '%s' is: %s", columnName, value))
-                    .collect(Collectors.toList());
+                    .toList();
 
             if (textSamples.isEmpty()) {
                 return result;
@@ -125,7 +125,7 @@ public class NERModelStrategy extends AbstractPIIDetectionStrategy {
                     // Add some sample examples (limit to 3)
                     List<String> sampleExamples = textSamples.stream()
                             .limit(3)
-                            .collect(Collectors.toList());
+                            .toList();
                     detection.getDetectionMetadata().put("sampleExamples", sampleExamples);
 
                     // Add the detection to the result
@@ -137,7 +137,7 @@ public class NERModelStrategy extends AbstractPIIDetectionStrategy {
             resultCache.put(cacheKey, result);
 
         } catch (Exception e) {
-            log.error("Error during NER analysis: {}", e.getMessage(), e);
+            LOGGER.error("Error during NER analysis: {}", e.getMessage(), e);
             // Mark service as unavailable on error
             serviceAvailable = false;
         }
@@ -171,7 +171,7 @@ public class NERModelStrategy extends AbstractPIIDetectionStrategy {
         String upperCaseType = type.toUpperCase();
 
         // Log for debugging
-        log.debug("Mapping NER entity type: {} (extracted: {})", nerEntityType, upperCaseType);
+        LOGGER.debug("Mapping NER entity type: {} (extracted: {})", nerEntityType, upperCaseType);
 
         // Map to PII types based on specific entities from the model
         return switch (upperCaseType) {
@@ -210,7 +210,7 @@ public class NERModelStrategy extends AbstractPIIDetectionStrategy {
 
             // If no other case matches
             default -> {
-                log.warn("Unmapped NER entity type: {} -> UNKNOWN", nerEntityType);
+                LOGGER.warn("Unmapped NER entity type: {} -> UNKNOWN", nerEntityType);
                 yield PIIType.UNKNOWN;
             }
         };
