@@ -7,6 +7,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,7 +24,7 @@ public class PIIDetectionResult {
     private List<TablePIIInfo> tableResults = new ArrayList<>();
 
     @Builder.Default
-    private Map<PIIType, Integer> piiTypeCounts = new HashMap<>();
+    private Map<PIIType, Integer> piiTypeCounts = new EnumMap<>(PIIType.class);
 
     private int totalPiiCount;
     private long processingTimeMs;
@@ -60,7 +61,7 @@ public class PIIDetectionResult {
                 for (PIITypeDetection detection : columnResult.getDetections()) {
                     PIIType type = detection.getPiiType();
                     if (piiTypeCounts == null) {
-                        piiTypeCounts = new HashMap<>();
+                        piiTypeCounts = new EnumMap<>(PIIType.class);
                     }
                     piiTypeCounts.put(type, piiTypeCounts.getOrDefault(type, 0) + 1);
                 }

@@ -41,5 +41,8 @@ public enum PIIType {
     RELIGION,
     POLITICAL_OPINION,
     DATE_TIME,
+    ZIPCODE,
+    ID_NUMBER,
+    SSN,
     SALARY, UNKNOWN
 }

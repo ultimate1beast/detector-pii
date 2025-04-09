@@ -13,6 +13,8 @@ import java.util.List;
 @AllArgsConstructor
 public class TablePIIInfo {
     private String tableName;
+
+    @Builder.Default
     private List<ColumnPIIInfo> columnResults = new ArrayList<>();
     private boolean hasPii;
     private double piiDensity; // Percentage of columns containing PII

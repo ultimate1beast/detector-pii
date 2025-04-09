@@ -12,7 +12,8 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+
+
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -33,7 +34,7 @@ public class PIIDetectorController {
     private final PIIDetector piiDetector;
     private final PIIReportGenerator reportGenerator;
 
-    @Autowired
+    
     public PIIDetectorController(PIIDetector piiDetector, PIIReportGenerator reportGenerator) {
         this.piiDetector = piiDetector;
         this.reportGenerator = reportGenerator;
@@ -71,8 +72,8 @@ public class PIIDetectorController {
         // Configure for quick scan with reduced sample size and higher threshold
         piiDetector.setConfidenceThreshold(confidenceThreshold);
 
-        if (piiDetector instanceof PIIDetectorImpl) {
-            ((PIIDetectorImpl) piiDetector).setSampleSize(sampleSize);
+        if (piiDetector instanceof PIIDetectorImpl piiDetectorImpl) {
+            piiDetectorImpl.setSampleSize(sampleSize);
         }
 
         PIIDetectionResult result = piiDetector.detectPII(connectionId, dbType);
