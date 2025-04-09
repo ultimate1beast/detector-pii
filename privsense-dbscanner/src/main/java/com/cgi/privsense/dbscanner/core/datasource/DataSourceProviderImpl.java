@@ -1,5 +1,6 @@
 package com.cgi.privsense.dbscanner.core.datasource;
 
+import com.cgi.privsense.common.constants.DatabaseConstants;
 import com.cgi.privsense.common.util.DatabaseUtils;
 import com.cgi.privsense.dbscanner.config.RoutingDataSource;
 import com.cgi.privsense.dbscanner.config.EmptyDataSource;
@@ -27,6 +28,19 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 @Component
 @Primary
 public class DataSourceProviderImpl implements DataSourceProvider {
+
+    // Using constants from DatabaseConstants class
+    
+    /**
+     * SQL validation query constants
+     */
+    private static final String VALIDATION_QUERY_SIMPLE = DatabaseConstants.VALIDATION_QUERY_SIMPLE;
+    private static final String VALIDATION_QUERY_ORACLE = DatabaseConstants.VALIDATION_QUERY_ORACLE;
+
+    /**
+     * Default database type
+     */
+    private static final String DEFAULT_DB_TYPE = DatabaseConstants.DB_TYPE_MYSQL;
 
     /**
      * Map of registered data sources.
@@ -100,7 +114,7 @@ public class DataSourceProviderImpl implements DataSourceProvider {
                     .driverClassName(driverClassName);
 
             // Create Hikari data source
-            HikariDataSource dataSource = (HikariDataSource) builder.type(HikariDataSource.class).build();
+            HikariDataSource dataSource = builder.type(HikariDataSource.class).build();
 
             // Pool configuration with sensible defaults
             configureConnectionPool(dataSource, request);
@@ -119,7 +133,7 @@ public class DataSourceProviderImpl implements DataSourceProvider {
             verifyConnection(dataSource);
 
             // Store database type for future reference
-            dataSourceTypes.put(request.getName(), request.getDbType() != null ? request.getDbType() : "mysql");
+            dataSourceTypes.put(request.getName(), request.getDbType() != null ? request.getDbType() : DEFAULT_DB_TYPE);
 
             log.info("Data source created successfully: {}", request.getName());
             return dataSource;
@@ -138,7 +152,7 @@ public class DataSourceProviderImpl implements DataSourceProvider {
     private String resolveDriverClassName(DatabaseConnectionRequest request) {
         String driverClassName = request.getDriverClassName();
         if (driverClassName == null) {
-            String dbType = request.getDbType() != null ? request.getDbType() : "mysql";
+            String dbType = request.getDbType() != null ? request.getDbType() : DEFAULT_DB_TYPE;
             driverClassName = DatabaseUtils.getDriverClassNameForDbType(dbType);
         }
         return driverClassName;
@@ -173,7 +187,7 @@ public class DataSourceProviderImpl implements DataSourceProvider {
         dataSource.setMaximumPoolSize(request.getMaxPoolSize() != null ? request.getMaxPoolSize() : 10);
         dataSource.setMinimumIdle(request.getMinIdle() != null ? request.getMinIdle() : 2);
         dataSource.setConnectionTimeout(request.getConnectionTimeout() != null ? request.getConnectionTimeout() : 30000);
-        dataSource.setAutoCommit(request.getAutoCommit() != null ? request.getAutoCommit() : true);
+        dataSource.setAutoCommit(request.getAutoCommit() != null && request.getAutoCommit());
 
         // Add additional pool optimizations
         dataSource.setIdleTimeout(60000); // 1 minute idle timeout
@@ -202,23 +216,23 @@ public class DataSourceProviderImpl implements DataSourceProvider {
      * @param dbType The database type
      */
     private void setValidationQueryForDbType(HikariDataSource dataSource, String dbType) {
-        String type = (dbType != null) ? dbType.toLowerCase() : "mysql";
+        String type = (dbType != null) ? dbType.toLowerCase() : DEFAULT_DB_TYPE;
 
         switch (type) {
-            case "mysql":
-                dataSource.setConnectionTestQuery("SELECT 1");
+            case DatabaseConstants.DB_TYPE_MYSQL:
+                dataSource.setConnectionTestQuery(VALIDATION_QUERY_SIMPLE);
                 break;
-            case "postgresql":
-                dataSource.setConnectionTestQuery("SELECT 1");
+            case DatabaseConstants.DB_TYPE_POSTGRESQL:
+                dataSource.setConnectionTestQuery(VALIDATION_QUERY_SIMPLE);
                 break;
-            case "oracle":
-                dataSource.setConnectionTestQuery("SELECT 1 FROM DUAL");
+            case DatabaseConstants.DB_TYPE_ORACLE:
+                dataSource.setConnectionTestQuery(VALIDATION_QUERY_ORACLE);
                 break;
-            case "sqlserver":
-                dataSource.setConnectionTestQuery("SELECT 1");
+            case DatabaseConstants.DB_TYPE_SQLSERVER:
+                dataSource.setConnectionTestQuery(VALIDATION_QUERY_SIMPLE);
                 break;
             default:
-                dataSource.setConnectionTestQuery("SELECT 1");
+                dataSource.setConnectionTestQuery(VALIDATION_QUERY_SIMPLE);
         }
     }
 
@@ -235,6 +249,13 @@ public class DataSourceProviderImpl implements DataSourceProvider {
         dataSourcesLock.writeLock().lock();
         try {
             dataSources.put(name, dataSource);
+            
+            // Set this as the default connection if no default is set yet or we have only one connection
+            if (dataSources.size() == 1) {
+                RoutingDataSource.setDefaultConnectionId(name);
+                log.info("Setting {} as default connection", name);
+            }
+            
             updateRoutingDataSource();
         } finally {
             dataSourcesLock.writeLock().unlock();
@@ -325,13 +346,13 @@ public class DataSourceProviderImpl implements DataSourceProvider {
                 // Convert product name to supported type
                 String type;
                 if (productName.contains("mysql")) {
-                    type = "mysql";
+                    type = DatabaseConstants.DB_TYPE_MYSQL;
                 } else if (productName.contains("postgresql")) {
-                    type = "postgresql";
+                    type = DatabaseConstants.DB_TYPE_POSTGRESQL;
                 } else if (productName.contains("oracle")) {
-                    type = "oracle";
+                    type = DatabaseConstants.DB_TYPE_ORACLE;
                 } else if (productName.contains("sql server")) {
-                    type = "sqlserver";
+                    type = DatabaseConstants.DB_TYPE_SQLSERVER;
                 } else {
                     throw new IllegalArgumentException("Unsupported database type: " + productName);
                 }
@@ -398,9 +419,9 @@ public class DataSourceProviderImpl implements DataSourceProvider {
             updateRoutingDataSource();
 
             // Close the data source if it's a Hikari data source
-            if (dataSource instanceof HikariDataSource) {
+            if (dataSource instanceof HikariDataSource hikariDataSource) {
                 log.info("Closing Hikari connection pool for data source: {}", name);
-                ((HikariDataSource) dataSource).close();
+                hikariDataSource.close();
             }
 
             log.info("Data source removed successfully: {}", name);
@@ -438,8 +459,7 @@ public class DataSourceProviderImpl implements DataSourceProvider {
                 }
 
                 // Add additional information for HikariDataSource
-                if (dataSource instanceof HikariDataSource) {
-                    HikariDataSource hikari = (HikariDataSource) dataSource;
+                if (dataSource instanceof HikariDataSource hikari) {
                     info.put("jdbcUrl", hikari.getJdbcUrl());
                     info.put("username", hikari.getUsername());
                     info.put("maxPoolSize", hikari.getMaximumPoolSize());

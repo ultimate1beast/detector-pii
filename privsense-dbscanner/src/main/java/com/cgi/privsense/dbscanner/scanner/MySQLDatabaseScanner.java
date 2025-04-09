@@ -5,7 +5,6 @@ import com.cgi.privsense.dbscanner.core.scanner.AbstractDatabaseScanner;
 import com.cgi.privsense.dbscanner.core.scanner.DatabaseType;
 import com.cgi.privsense.dbscanner.exception.DatabaseOperationException;
 import com.cgi.privsense.dbscanner.model.ColumnMetadata;
-import com.cgi.privsense.dbscanner.model.DataSample;
 import com.cgi.privsense.dbscanner.model.RelationshipMetadata;
 import com.cgi.privsense.dbscanner.model.TableMetadata;
 import org.springframework.stereotype.Component;
@@ -338,12 +337,13 @@ public class MySQLDatabaseScanner extends AbstractDatabaseScanner {
     }
 
     /**
-     * Optimized implementation for MySQL-specific prepared statements.
-     * Uses MySQL's streaming mode for efficient large result set handling.
-     */
-    @Override
-    protected PreparedStatement prepareSampleTableStatement(Connection connection, String tableName, int limit)
-            throws SQLException {
+ * Optimized implementation for MySQL-specific prepared statements.
+ * Uses MySQL's streaming mode for efficient large result set handling.
+ */
+@Override
+protected PreparedStatement prepareSampleTableStatement(Connection connection, String tableName, int limit)
+        throws SQLException {
+    try {
         // MySQL-specific optimizations for sampling
         String sql = String.format("SELECT * FROM %s LIMIT ?", escapeIdentifier(tableName));
         PreparedStatement stmt = connection.prepareStatement(
@@ -355,7 +355,10 @@ public class MySQLDatabaseScanner extends AbstractDatabaseScanner {
         stmt.setFetchSize(Integer.MIN_VALUE);
         stmt.setInt(1, limit);
         return stmt;
+    } catch (SQLException e) {
+        throw DatabaseOperationException.scannerError("Error preparing sample statement for table: " + tableName, e);
     }
+}
 
     /**
      * Optimized implementation for MySQL-specific column sampling.
@@ -364,6 +367,7 @@ public class MySQLDatabaseScanner extends AbstractDatabaseScanner {
     protected PreparedStatement prepareSampleColumnStatement(Connection connection, String tableName,
                                                              String columnName, int limit)
             throws SQLException {
+                try{
         String sql = String.format("SELECT %s FROM %s LIMIT ?",
                 escapeIdentifier(columnName),
                 escapeIdentifier(tableName));
@@ -376,5 +380,8 @@ public class MySQLDatabaseScanner extends AbstractDatabaseScanner {
         stmt.setFetchSize(Integer.MIN_VALUE);
         stmt.setInt(1, limit);
         return stmt;
+                }catch(SQLException e){
+                    throw DatabaseOperationException.scannerError("Error preparing sample statement for column: " + columnName, e);
+                }
     }
 }
