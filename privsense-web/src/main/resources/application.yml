@@ -9,7 +9,7 @@ spring:
   application:
     name: privsense
   jackson:
-    default-property-inclusion: non_null
+    default-property-inclusion: NON_NULL
   # Cache Configuration
   cache:
     type: caffeine

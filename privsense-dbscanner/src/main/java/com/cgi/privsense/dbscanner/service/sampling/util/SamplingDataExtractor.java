@@ -1,110 +1,76 @@
 package com.cgi.privsense.dbscanner.service.sampling.util;
 
 import com.cgi.privsense.dbscanner.model.DataSample;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.experimental.UtilityClass;
 
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
- * Utility class for extracting and processing data samples.
+ * Utility class for extracting data from samples.
+ * Provides methods to extract specific columns from data samples.
  */
+@UtilityClass
 public class SamplingDataExtractor {
-    private static final Logger log = LoggerFactory.getLogger(SamplingDataExtractor.class);
-
-    private SamplingDataExtractor() {
-        // Utility class - prevent instantiation
-    }
 
     /**
      * Extracts column data from a data sample.
      *
-     * @param columnNames List of column names to extract
-     * @param sample      Data sample containing the data
+     * @param columnNames Column names to extract
+     * @param sample      Data sample to extract from
      * @return Map of column name to list of values
      */
-    public static Map<String, List<Object>> extractColumnDataFromSample(List<String> columnNames, DataSample sample) {
+    public Map<String, List<Object>> extractColumnDataFromSample(List<String> columnNames, DataSample sample) {
         if (sample == null || sample.getRows() == null || sample.getRows().isEmpty()) {
-            log.warn("No data in sample to extract columns from");
             return Collections.emptyMap();
         }
-        
-        // Convert column names to lowercase for case-insensitive comparison
-        Set<String> requestedColsLower = columnNames.stream()
-                .map(String::toLowerCase)
-                .collect(Collectors.toSet());
 
-        // Initialize column data map
-        Map<String, List<Object>> columnData = initializeColumnDataMap(columnNames, sample.getRows().size());
+        Map<String, List<Object>> result = new HashMap<>(columnNames.size());
 
-        // Process each row and extract the requested column values
-        for (Map<String, Object> row : sample.getRows()) {
-            processRowForColumnExtraction(row, columnNames, requestedColsLower, columnData);
-        }
-
-        return columnData;
-    }
-
-    /**
-     * Initializes the column data map with empty lists.
-     *
-     * @param columnNames  List of column names
-     * @param expectedSize Expected size of the lists
-     * @return Map with initialized empty lists
-     */
-    private static Map<String, List<Object>> initializeColumnDataMap(List<String> columnNames, int expectedSize) {
-        Map<String, List<Object>> columnData = HashMap.newHashMap(columnNames.size());
-        for (String column : columnNames) {
-            columnData.put(column, new ArrayList<>(expectedSize));
-        }
-        return columnData;
-    }
-
-    /**
-     * Processes a single row to extract column values.
-     *
-     * @param row                The row to process
-     * @param columnNames        Original column names
-     * @param requestedColsLower Lowercase column names for case-insensitive matching
-     * @param columnData         Map to store the extracted values
-     */
-    private static void processRowForColumnExtraction(Map<String, Object> row, List<String> columnNames,
-            Set<String> requestedColsLower, Map<String, List<Object>> columnData) {
-        for (Map.Entry<String, Object> entry : row.entrySet()) {
-            String colName = entry.getKey();
-
-            // Check for direct match or case-insensitive match
-            if (columnNames.contains(colName) || requestedColsLower.contains(colName.toLowerCase())) {
-                addValueToMatchingColumn(colName, entry.getValue(), columnNames, columnData);
+        // Initialize lists for each column
+        for (String columnName : columnNames) {
+            if (sample.getColumnNames().contains(columnName)) {
+                result.put(columnName, new ArrayList<>(sample.getRows().size()));
             }
         }
-    }
 
-    /**
-     * Adds a value to the matching column in the column data map.
-     *
-     * @param colName     Column name from the row
-     * @param value       Value to add
-     * @param columnNames List of requested column names
-     * @param columnData  Map to store the values
-     */
-    private static void addValueToMatchingColumn(String colName, Object value, List<String> columnNames,
-            Map<String, List<Object>> columnData) {
-        List<Object> colValues = columnData.get(colName);
-
-        if (colValues == null) {
-            // Try to find by case-insensitive match
-            for (String requestedCol : columnNames) {
-                if (requestedCol.equalsIgnoreCase(colName)) {
-                    colValues = columnData.get(requestedCol);
-                    break;
+        // Extract values for each column
+        for (Map<String, Object> row : sample.getRows()) {
+            for (String columnName : columnNames) {
+                if (result.containsKey(columnName)) {
+                    result.get(columnName).add(row.get(columnName));
                 }
             }
         }
 
-        if (colValues != null) {
-            colValues.add(value);
+        return result;
+    }
+
+    /**
+     * Extracts data for a single column from a data sample.
+     *
+     * @param columnName Column name to extract
+     * @param sample     Data sample to extract from
+     * @return List of values for the column
+     */
+    public List<Object> extractColumnDataFromSample(String columnName, DataSample sample) {
+        if (sample == null || sample.getRows() == null || sample.getRows().isEmpty()) {
+            return Collections.emptyList();
         }
+
+        if (!sample.getColumnNames().contains(columnName)) {
+            return Collections.emptyList();
+        }
+
+        List<Object> result = new ArrayList<>(sample.getRows().size());
+
+        for (Map<String, Object> row : sample.getRows()) {
+            result.add(row.get(columnName));
+        }
+
+        return result;
     }
 }

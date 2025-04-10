@@ -7,18 +7,8 @@ import lombok.Data;
  */
 @Data
 public class ThreadProperties {
-    /**
-     * Maximum pool size.
-     */
-    private int maxPoolSize = 8;
-
-    /**
-     * Sampler pool size.
-     */
-    private int samplerPoolSize = 4;
-
-    /**
-     * Number of sampling consumers.
-     */
-    private int samplingConsumers = 3;
+    private int corePoolSize = 4;
+    private int maxPoolSize = 12;
+    private int keepAliveTime = 60;
+    private boolean virtualThreads = true;
 }
