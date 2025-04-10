@@ -201,38 +201,42 @@ public class DatabaseScannerController {
     }
 
     @Operation(summary = "Sample data from multiple columns in parallel")
-    @PostMapping("/connections/{connectionId}/tables/{tableName}/columns/sample")
-    public ResponseEntity<ApiResponse<Map<String, List<Object>>>> sampleColumnsInParallel(
-            @PathVariable("connectionId") String connectionId,
-            @PathVariable("tableName") String tableName,
-            @RequestParam(name = "dbType", required = false) String dbType,
-            @RequestParam(name = "limit", defaultValue = "10") int limit,
-            @RequestBody SamplingRequest request) {
+@PostMapping("/connections/{connectionId}/tables/{tableName}/columns/sample")
+public ResponseEntity<ApiResponse<Map<String, List<Object>>>> sampleColumnsInParallel(
+        @PathVariable("connectionId") String connectionId,
+        @PathVariable("tableName") String tableName,
+        @RequestParam(name = "dbType", required = false) String dbType,
+        @RequestParam(name = "limit", defaultValue = "10") int limit,
+        @RequestBody SamplingRequest request) {
 
-        // Validate the request
-        if (request == null || request.getItems() == null || request.getItems().isEmpty()) {
-            return ResponseEntity
-                    .badRequest()
-                    .body(ApiResponse.error("No columns specified for sampling"));
-        }
+    // Validate the request
+    if (request == null || request.getItems() == null || request.getItems().isEmpty()) {
+        return ResponseEntity
+                .badRequest()
+                .body(ApiResponse.error("No columns specified for sampling"));
+    }
 
-        String actualDbType = resolveDbType(connectionId, dbType);
+    String actualDbType = resolveDbType(connectionId, dbType);
+    
+    // Fix: Only construct the log message if INFO level is enabled
+    if (logger.isInfoEnabled()) {
         logger.info("Sampling multiple columns in parallel from table: {}, connection: {}, db type: {}, limit: {}, columns: {}",
                 tableName, connectionId, actualDbType, limit, String.join(", ", request.getItems()));
-
-        Map<String, List<Object>> samples = samplingService.sampleColumnsInParallel(
-                actualDbType, connectionId, tableName, request.getItems(), limit);
-
-        if (samples.isEmpty()) {
-            // Create an empty map of the correct type
-            Map<String, List<Object>> emptyResult = new HashMap<>();
-            // Add a message to the logs, but return the empty map
-            logger.warn("None of the requested columns could be found in table {}", tableName);
-            return ResponseEntity.ok(ApiResponse.success(emptyResult));
-        }
-
-        return ResponseEntity.ok(ApiResponse.success(samples));
     }
+
+    Map<String, List<Object>> samples = samplingService.sampleColumnsInParallel(
+            actualDbType, connectionId, tableName, request.getItems(), limit);
+
+    if (samples.isEmpty()) {
+        // Create an empty map of the correct type
+        Map<String, List<Object>> emptyResult = new HashMap<>();
+        // Add a message to the logs, but return the empty map
+        logger.warn("None of the requested columns could be found in table {}", tableName);
+        return ResponseEntity.ok(ApiResponse.success(emptyResult));
+    }
+
+    return ResponseEntity.ok(ApiResponse.success(samples));
+}
 
     @Operation(summary = "Sample data from multiple tables in parallel")
     @PostMapping("/connections/{connectionId}/tables/sample")

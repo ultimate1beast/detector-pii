@@ -73,44 +73,32 @@ public class MavenDriverManager implements DriverManager {
         if (driverClassName == null || driverClassName.isEmpty()) {
             throw DatabaseOperationException.driverError("Driver class name cannot be null or empty");
         }
-
+    
         // First check without locking
         if (isDriverLoaded(driverClassName)) {
             log.debug("Driver already loaded: {}", driverClassName);
             return;
         }
-
-        // Use lock for the downloading and loading part
-        driversLock.readLock().lock();
-        try {
-            // Double-check after acquiring the lock (in case another thread just loaded it)
-            if (isDriverLoaded(driverClassName)) {
-                log.debug("Driver already loaded (detected after lock): {}", driverClassName);
-                return;
-            }
-        } finally {
-            driversLock.readLock().unlock();
-        }
-
-        // Upgrade to write lock for loading
+    
+        // Skip the separate readLock section and go directly to the writeLock
         driversLock.writeLock().lock();
         try {
-            // Triple-check to be absolutely sure (in case it was loaded while we were acquiring the write lock)
+            // Double-check after acquiring the write lock
             if (isDriverLoaded(driverClassName)) {
                 log.debug("Driver already loaded (detected after write lock): {}", driverClassName);
                 return;
             }
-
+    
             String mavenCoordinates = driverMavenCoordinates.get(driverClassName);
             if (mavenCoordinates == null) {
                 throw DatabaseOperationException.driverError("Unknown driver: " + driverClassName +
                         ". Add Maven coordinates to configuration properties.");
             }
-
+    
             // Download and load the driver
             Path driverJar = downloadDriver(mavenCoordinates);
             loadDriver(driverClassName, driverJar);
-
+    
             log.info("Successfully loaded driver: {}", driverClassName);
         } catch (Exception e) {
             log.error("Failed to load driver: {}", driverClassName, e);

@@ -80,7 +80,7 @@ public class DatabaseScannerService implements ScannerService {
             logger.debug("{} completed successfully", operation);
             return result;
         } catch (Exception e) {
-            logger.error("Error during {}: {}", operation, e.getMessage(), e);
+           
             throw DatabaseOperationException.scannerError("Failed to execute " + operation, e);
         }
     }

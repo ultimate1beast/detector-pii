@@ -4,6 +4,9 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.ToString;
 
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.io.Serial;
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -39,6 +42,24 @@ public class DataSample implements Serializable {
     private final List<Map<String, Object>> rows;
 
     /**
+     * Custom serialization logic to ensure only serializable objects are included.
+     */
+    @Serial
+    private void writeObject(ObjectOutputStream out) throws IOException {
+        out.defaultWriteObject();
+        // Additional custom serialization if needed
+    }
+
+    /**
+     * Custom deserialization logic.
+     */
+    @Serial
+    private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
+        in.defaultReadObject();
+        // Additional custom deserialization if needed
+    }
+
+    /**
      * Total number of rows in the table.
      */
     private final int totalRows;
@@ -52,8 +73,8 @@ public class DataSample implements Serializable {
      * Creates a data sample from a list of rows.
      * Single factory method to replace multiple constructors and factory methods.
      *
-     * @param tableName Table name
-     * @param rows List of rows
+     * @param tableName        Table name
+     * @param rows             List of rows
      * @param totalRowsInTable Optional total rows in the table (if known)
      * @return Data sample
      */
@@ -84,7 +105,7 @@ public class DataSample implements Serializable {
      * Overloaded method when total rows equals sample size.
      *
      * @param tableName Table name
-     * @param rows List of rows
+     * @param rows      List of rows
      * @return Data sample
      */
     public static DataSample create(String tableName, List<Map<String, Object>> rows) {

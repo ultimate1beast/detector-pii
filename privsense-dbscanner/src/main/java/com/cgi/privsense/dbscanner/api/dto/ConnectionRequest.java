@@ -1,5 +1,6 @@
 package com.cgi.privsense.dbscanner.api.dto;
 
+import com.cgi.privsense.common.constants.DatabaseConstants;
 import com.cgi.privsense.dbscanner.config.dtoconfig.DatabaseConnectionRequest;
 import lombok.Data;
 
@@ -153,18 +154,18 @@ public class ConnectionRequest {
             return dbType.toLowerCase();
         } else if (driverClassName != null) {
             // Extract db type from driver if possible
-            if (driverClassName.contains("mysql")) {
-                return "mysql";
-            } else if (driverClassName.contains("postgresql")) {
-                return "postgresql";
-            } else if (driverClassName.contains("oracle")) {
-                return "oracle";
-            } else if (driverClassName.contains("sqlserver")) {
-                return "sqlserver";
+            if (driverClassName.contains(DatabaseConstants.DB_TYPE_MYSQL)) {
+                return DatabaseConstants.DB_TYPE_MYSQL;
+            } else if (driverClassName.contains(DatabaseConstants.DB_TYPE_POSTGRESQL)) {
+                return DatabaseConstants.DB_TYPE_POSTGRESQL;
+            } else if (driverClassName.contains(DatabaseConstants.DB_TYPE_ORACLE)) {
+                return DatabaseConstants.DB_TYPE_ORACLE;
+            } else if (driverClassName.contains(DatabaseConstants.DB_TYPE_SQLSERVER)) {
+                return DatabaseConstants.DB_TYPE_SQLSERVER;
             }
         }
 
-        return "db";
+        return DatabaseConstants.DB_TYPE_DEFAULT;
     }
 
     /**
@@ -180,10 +181,10 @@ public class ConnectionRequest {
         }
 
         return switch (dbType.toLowerCase()) {
-            case "mysql" -> port == 3306;
-            case "postgresql" -> port == 5432;
-            case "oracle" -> port == 1521;
-            case "sqlserver" -> port == 1433;
+            case DatabaseConstants.DB_TYPE_MYSQL -> port == 3306;
+            case DatabaseConstants.DB_TYPE_POSTGRESQL -> port == 5432;
+            case DatabaseConstants.DB_TYPE_ORACLE -> port == 1521;
+            case DatabaseConstants.DB_TYPE_SQLSERVER -> port == 1433;
             default -> false;
         };
     }

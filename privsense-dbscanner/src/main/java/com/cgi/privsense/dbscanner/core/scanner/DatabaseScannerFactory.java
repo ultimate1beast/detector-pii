@@ -1,5 +1,8 @@
 package com.cgi.privsense.dbscanner.core.scanner;
 
+import com.cgi.privsense.common.constants.DatabaseConstants;
+import com.cgi.privsense.dbscanner.exception.DatabaseOperationException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationContext;
@@ -13,7 +16,8 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
- * Simplified factory for creating database scanners with improved error handling.
+ * Simplified factory for creating database scanners with improved error
+ * handling.
  */
 @Component
 public class DatabaseScannerFactory {
@@ -25,19 +29,12 @@ public class DatabaseScannerFactory {
     private final Map<String, Class<? extends DatabaseScanner>> scannerTypes;
 
     /**
-     * Spring application context for bean creation.
-     */
-    private final ApplicationContext applicationContext;
-
-    /**
      * Constructor.
      * Finds all scanners with the @DatabaseType annotation.
      *
      * @param applicationContext Spring application context
      */
     public DatabaseScannerFactory(ApplicationContext applicationContext) {
-        this.applicationContext = applicationContext;
-
         Map<String, DatabaseScanner> scannerBeans = applicationContext.getBeansOfType(DatabaseScanner.class);
 
         this.scannerTypes = scannerBeans.values().stream()
@@ -47,24 +44,25 @@ public class DatabaseScannerFactory {
                                 .getAnnotation(DatabaseType.class)
                                 .value()
                                 .toLowerCase(),
-                        DatabaseScanner::getClass
-                ));
+                        DatabaseScanner::getClass));
 
         logger.info("Registered database scanners: {}", scannerTypes.keySet());
     }
 
     /**
      * Gets a scanner for the specified database type.
-     * Improved error handling and fallback to default scanner if specified type not found.
+     * Improved error handling and fallback to default scanner if specified type not
+     * found.
      *
-     * @param dbType Database type
+     * @param dbType     Database type
      * @param dataSource Data source
      * @return Database scanner
+     * @throws DatabaseScannerException if unable to create the database scanner
      */
-    public DatabaseScanner getScanner(String dbType, DataSource dataSource) {
+    public DatabaseScanner getScanner(String dbType, DataSource dataSource) throws DatabaseOperationException {
         if (dbType == null || dbType.isEmpty()) {
             logger.warn("No database type specified, defaulting to MySQL");
-            dbType = "mysql";
+            dbType = DatabaseConstants.DB_TYPE_MYSQL;
         }
 
         String normalizedDbType = dbType.toLowerCase();
@@ -86,9 +84,9 @@ public class DatabaseScannerFactory {
         }
 
         // If still not found, and MySQL is available, use that as default
-        if (scannerClass == null && scannerTypes.containsKey("mysql")) {
+        if (scannerClass == null && scannerTypes.containsKey(DatabaseConstants.DB_TYPE_MYSQL)) {
             logger.warn("Unsupported database type: {}, defaulting to MySQL", dbType);
-            scannerClass = scannerTypes.get("mysql");
+            scannerClass = scannerTypes.get(DatabaseConstants.DB_TYPE_MYSQL);
         }
 
         // If nothing is available, throw a helpful exception
@@ -104,8 +102,8 @@ public class DatabaseScannerFactory {
             return scannerClass.getConstructor(DataSource.class)
                     .newInstance(dataSource);
         } catch (Exception e) {
-            logger.error("Failed to create scanner for type: {}", dbType, e);
-            throw new RuntimeException("Failed to create scanner for type: " + dbType, e);
+
+            throw DatabaseOperationException.scannerError("Failed to create scanner for type: " + dbType,e);
         }
     }
 

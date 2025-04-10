@@ -44,7 +44,7 @@ public interface DatabaseScanner {
      * @return Data sample
      */
     DataSample sampleTableData(String tableName, int limit);
-
+    
     /**
      * Samples data from a column.
      *

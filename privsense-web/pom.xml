@@ -23,6 +23,10 @@
             <groupId>com.cgi.privsense</groupId>
             <artifactId>privsense-dbscanner</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.cgi.privsense</groupId>
+            <artifactId>privsense-piidetector</artifactId>
+        </dependency>
 
         <!-- Spring Boot Starters -->
         <dependency>

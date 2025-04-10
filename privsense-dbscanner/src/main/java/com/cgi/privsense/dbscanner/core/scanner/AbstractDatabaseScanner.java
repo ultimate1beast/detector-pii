@@ -2,8 +2,9 @@ package com.cgi.privsense.dbscanner.core.scanner;
 
 import com.cgi.privsense.common.util.DatabaseUtils;
 import com.cgi.privsense.dbscanner.exception.DatabaseOperationException;
-import com.cgi.privsense.dbscanner.model.ColumnMetadata;
 import com.cgi.privsense.dbscanner.model.DataSample;
+import lombok.Builder;
+import lombok.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
@@ -47,18 +48,18 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
      * Constructor.
      *
      * @param dataSource The data source
-     * @param dbType The database type
+     * @param dbType     The database type
      */
     protected AbstractDatabaseScanner(DataSource dataSource, String dbType) {
-        this(dataSource, dbType, new JdbcSettings());
+        this(dataSource, dbType, JdbcSettings.builder().build());
     }
 
     /**
      * Constructor with JDBC settings.
      *
      * @param dataSource The data source
-     * @param dbType The database type
-     * @param settings JDBC settings
+     * @param dbType     The database type
+     * @param settings   JDBC settings
      */
     protected AbstractDatabaseScanner(DataSource dataSource, String dbType, JdbcSettings settings) {
         this.jdbcTemplate = new JdbcTemplate(dataSource);
@@ -90,7 +91,7 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
      * Executes a query with standardized error handling.
      *
      * @param operationName Operation name for logging
-     * @param query Function that executes the query
+     * @param query         Function that executes the query
      * @return Query result
      * @throws DatabaseOperationException On error
      */
@@ -101,20 +102,27 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
             logger.debug("Operation completed successfully: {}", operationName);
             return result;
         } catch (DataAccessException e) {
-            logger.error("Database error executing {}: {}", operationName, e.getMessage(), e);
-            throw DatabaseOperationException.scannerError("Error during " + operationName, e);
+            // Add context and rethrow
+            throw DatabaseOperationException.scannerError(
+                    String.format("Error during %s operation on %s database: %s",
+                            operationName, dbType, e.getMessage()),
+                    e);
         } catch (Exception e) {
-            logger.error("Unexpected error executing {}: {}", operationName, e.getMessage(), e);
-            throw DatabaseOperationException.scannerError("Unexpected error during " + operationName, e);
+            // Add context and rethrow
+            throw DatabaseOperationException.scannerError(
+                    String.format("Unexpected error during %s operation on %s database: %s",
+                            operationName, dbType, e.getMessage()),
+                    e);
         }
     }
 
     /**
      * Template method for sampling table data.
      * Implements the common pattern for all database types.
+     * Dialect-specific implementations will be handled by subclasses.
      *
      * @param tableName Table name
-     * @param limit Maximum number of rows
+     * @param limit     Maximum number of rows
      * @return Data sample
      */
     @Override
@@ -122,30 +130,36 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
         DatabaseUtils.validateTableName(tableName);
 
         return executeQuery("sampleTableData", jdbc -> {
-            try (Connection conn = jdbc.getDataSource().getConnection();
-                 PreparedStatement stmt = prepareSampleTableStatement(conn, tableName, limit)) {
+            DataSource ds = jdbc.getDataSource();
+            if (ds == null) {
+                throw DatabaseOperationException.samplingError("DataSource is null, cannot sample table: " + tableName,
+                        null);
+            }
 
-                try (ResultSet rs = stmt.executeQuery()) {
-                    List<Map<String, Object>> rows = new ArrayList<>();
-                    int columnCount = rs.getMetaData().getColumnCount();
+            try (Connection conn = ds.getConnection();
+                    PreparedStatement stmt = prepareSampleTableStatement(conn, tableName, limit);
+                    ResultSet rs = stmt.executeQuery()) {
 
-                    // Pre-fetch column names for improved performance
-                    String[] columnNames = new String[columnCount];
-                    for (int i = 0; i < columnCount; i++) {
-                        columnNames[i] = rs.getMetaData().getColumnName(i + 1);
-                    }
+                List<Map<String, Object>> rows = new ArrayList<>();
+                int columnCount = rs.getMetaData().getColumnCount();
 
-                    while (rs.next()) {
-                        Map<String, Object> row = new HashMap<>(columnCount);
-                        for (int i = 0; i < columnCount; i++) {
-                            row.put(columnNames[i], JdbcUtils.getResultSetValue(rs, i + 1));
-                        }
-                        rows.add(row);
-                    }
-
-                    return DataSample.create(tableName, rows);
+                // Pre-fetch column names for improved performance
+                String[] columnNames = new String[columnCount];
+                for (int i = 0; i < columnCount; i++) {
+                    columnNames[i] = rs.getMetaData().getColumnName(i + 1);
                 }
+
+                while (rs.next()) {
+                    Map<String, Object> row = HashMap.newHashMap(columnCount);
+                    for (int i = 0; i < columnCount; i++) {
+                        row.put(columnNames[i], JdbcUtils.getResultSetValue(rs, i + 1));
+                    }
+                    rows.add(row);
+                }
+
+                return DataSample.create(tableName, rows);
             } catch (SQLException e) {
+                // Add context and rethrow
                 throw DatabaseOperationException.samplingError("Error sampling table: " + tableName, e);
             }
         });
@@ -154,10 +168,11 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
     /**
      * Template method for sampling column data.
      * Implements the common pattern for all database types.
+     * Dialect-specific implementations will be handled by subclasses.
      *
-     * @param tableName Table name
+     * @param tableName  Table name
      * @param columnName Column name
-     * @param limit Maximum number of values
+     * @param limit      Maximum number of values
      * @return List of sampled values
      */
     @Override
@@ -166,17 +181,23 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
         DatabaseUtils.validateColumnName(columnName);
 
         return executeQuery("sampleColumnData", jdbc -> {
-            try (Connection conn = jdbc.getDataSource().getConnection();
-                 PreparedStatement stmt = prepareSampleColumnStatement(conn, tableName, columnName, limit)) {
+            DataSource ds = jdbc.getDataSource();
+            if (ds == null) {
+                throw DatabaseOperationException.samplingError("DataSource is null, cannot sample column: "
+                        + tableName + "." + columnName, null);
+            }
+
+            try (Connection conn = ds.getConnection();
+                    PreparedStatement stmt = prepareSampleColumnStatement(conn, tableName, columnName, limit);
+                    ResultSet rs = stmt.executeQuery()) {
 
                 List<Object> values = new ArrayList<>(limit);
-                try (ResultSet rs = stmt.executeQuery()) {
-                    while (rs.next()) {
-                        values.add(JdbcUtils.getResultSetValue(rs, 1));
-                    }
+                while (rs.next()) {
+                    values.add(JdbcUtils.getResultSetValue(rs, 1));
                 }
                 return values;
             } catch (SQLException e) {
+                // Add context and rethrow
                 throw DatabaseOperationException.samplingError(
                         "Error sampling column: " + tableName + "." + columnName, e);
             }
@@ -184,47 +205,101 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
     }
 
     /**
+     * Builds and returns SQL for sampling table data.
+     * Subclasses must override this to provide database-specific SQL generation.
+     *
+     * @param tableName Table name
+     * @return SQL string for sampling
+     */
+    protected abstract String buildSampleTableSql(String tableName);
+
+    /**
      * Creates a prepared statement for sampling table data.
-     * Subclasses can override this to customize SQL generation.
+     * Delegates to buildSampleTableSql which is overridden by database-specific subclasses.
+     * <p>
+     * NOTE: The caller is responsible for closing the returned PreparedStatement.
+     * This method intentionally does not close the statement as it needs to be
+     * used by the caller.
      *
      * @param connection Database connection
-     * @param tableName Table name
-     * @param limit Maximum number of rows
-     * @return PreparedStatement
+     * @param tableName  Table name
+     * @param limit      Maximum number of rows
+     * @return PreparedStatement that must be closed by the caller
      * @throws SQLException On SQL error
      */
     protected PreparedStatement prepareSampleTableStatement(Connection connection, String tableName, int limit)
             throws SQLException {
-        String sql = String.format("SELECT * FROM %s LIMIT ?", escapeIdentifier(tableName));
-        PreparedStatement stmt = connection.prepareStatement(sql);
-        stmt.setInt(1, limit);
-        return stmt;
+        String sql = buildSampleTableSql(tableName);
+        PreparedStatement stmt = null;
+        try {
+            stmt = connection.prepareStatement(sql);
+            stmt.setInt(1, limit);
+            return stmt;
+        } catch (SQLException e) {
+            if (stmt != null) {
+                try {
+                    stmt.close();
+                } catch (SQLException ex) {
+                    // Log suppressed exception
+                    logger.warn("Error closing statement after exception", ex);
+                    e.addSuppressed(ex);
+                }
+            }
+            throw e;
+        }
     }
 
     /**
+     * Builds SQL for sampling column data.
+     * Subclasses must override this to provide database-specific SQL generation.
+     *
+     * @param tableName  Table name
+     * @param columnName Column name
+     * @return SQL string for sampling column data
+     */
+    protected abstract String buildSampleColumnSql(String tableName, String columnName);
+
+    /**
      * Creates a prepared statement for sampling column data.
-     * Subclasses can override this to customize SQL generation.
+     * Delegates to buildSampleColumnSql which is overridden by database-specific subclasses.
+     * <p>
+     * NOTE: The caller is responsible for closing the returned PreparedStatement.
+     * This method intentionally does not close the statement as it needs to be
+     * used by the caller.
      *
      * @param connection Database connection
-     * @param tableName Table name
+     * @param tableName  Table name
      * @param columnName Column name
-     * @param limit Maximum number of rows
-     * @return PreparedStatement
+     * @param limit      Maximum number of rows
+     * @return PreparedStatement that must be closed by the caller
      * @throws SQLException On SQL error
      */
     protected PreparedStatement prepareSampleColumnStatement(Connection connection, String tableName,
-                                                             String columnName, int limit)
+            String columnName, int limit)
             throws SQLException {
-        String sql = String.format("SELECT %s FROM %s LIMIT ?",
-                escapeIdentifier(columnName),
-                escapeIdentifier(tableName));
-        PreparedStatement stmt = connection.prepareStatement(sql);
-        stmt.setInt(1, limit);
-        return stmt;
+        String sql = buildSampleColumnSql(tableName, columnName);
+        PreparedStatement stmt = null;
+        try {
+            stmt = connection.prepareStatement(sql);
+            stmt.setInt(1, limit);
+            return stmt;
+        } catch (SQLException e) {
+            if (stmt != null) {
+                try {
+                    stmt.close();
+                } catch (SQLException ex) {
+                    // Log suppressed exception
+                    logger.warn("Error closing statement after exception", ex);
+                    e.addSuppressed(ex);
+                }
+            }
+            throw e;
+        }
     }
 
     /**
      * Checks if a table exists.
+     * Subclasses may override this to provide database-specific implementation.
      *
      * @param tableName Table name
      * @return true if the table exists, false otherwise
@@ -232,13 +307,25 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
     protected boolean tableExists(String tableName) {
         DatabaseUtils.validateTableName(tableName);
         try {
-            String sql = String.format("SELECT 1 FROM %s WHERE 1 = 0", escapeIdentifier(tableName));
+            String sql = buildTableExistsSql(tableName);
             jdbcTemplate.queryForObject(sql, Integer.class);
             return true;
         } catch (Exception e) {
-            logger.debug("Table doesn't exist or is not accessible: {}", tableName);
+            logger.debug("Table doesn't exist or is not accessible: {}, reason: {}",
+                    tableName, e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * Builds SQL for checking if a table exists.
+     * Subclasses should override this to provide database-specific SQL generation.
+     *
+     * @param tableName Table name
+     * @return SQL string for checking table existence
+     */
+    protected String buildTableExistsSql(String tableName) {
+        return String.format("SELECT 1 FROM %s WHERE 1 = 0", escapeIdentifier(tableName));
     }
 
     /**
@@ -253,33 +340,19 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
     }
 
     /**
-     * JDBC settings class for configuring database connections.
+     * Immutable JDBC settings class for configuring database connections.
+     * Uses Lombok @Value for immutability and @Builder for the builder pattern.
      */
+    @Value
+    @Builder
     public static class JdbcSettings {
-        private int fetchSize = 1000;
-        private int maxRows = 10000;
-        private int queryTimeoutSeconds = 30;
-
-        public JdbcSettings() {
-            // Default constructor with default values
-        }
-
-        public JdbcSettings(int fetchSize, int maxRows, int queryTimeoutSeconds) {
-            this.fetchSize = fetchSize;
-            this.maxRows = maxRows;
-            this.queryTimeoutSeconds = queryTimeoutSeconds;
-        }
-
-        public int getFetchSize() {
-            return fetchSize;
-        }
-
-        public int getMaxRows() {
-            return maxRows;
-        }
-
-        public int getQueryTimeoutSeconds() {
-            return queryTimeoutSeconds;
-        }
+        @Builder.Default
+        int fetchSize = 1000;
+        
+        @Builder.Default
+        int maxRows = 10000;
+        
+        @Builder.Default
+        int queryTimeoutSeconds = 30;
     }
 }
