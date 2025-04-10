@@ -167,7 +167,11 @@ public class MySQLDatabaseScanner extends AbstractDatabaseScanner {
      * @param dataSource The data source
      */
     public MySQLDatabaseScanner(DataSource dataSource) {
-        super(dataSource, "mysql", new JdbcSettings(500, 5000, 60));
+        super(dataSource, "mysql", JdbcSettings.builder()
+                .fetchSize(500)
+                .maxRows(5000)
+                .queryTimeoutSeconds(60)
+                .build());
     }
 
     /**
@@ -337,28 +341,55 @@ public class MySQLDatabaseScanner extends AbstractDatabaseScanner {
     }
 
     /**
- * Optimized implementation for MySQL-specific prepared statements.
- * Uses MySQL's streaming mode for efficient large result set handling.
- */
-@Override
-protected PreparedStatement prepareSampleTableStatement(Connection connection, String tableName, int limit)
-        throws SQLException {
-    try {
-        // MySQL-specific optimizations for sampling
-        String sql = String.format("SELECT * FROM %s LIMIT ?", escapeIdentifier(tableName));
-        PreparedStatement stmt = connection.prepareStatement(
-                sql,
-                ResultSet.TYPE_FORWARD_ONLY,
-                ResultSet.CONCUR_READ_ONLY
-        );
-        // Set to streaming mode for MySQL (server-side cursors)
-        stmt.setFetchSize(Integer.MIN_VALUE);
-        stmt.setInt(1, limit);
-        return stmt;
-    } catch (SQLException e) {
-        throw DatabaseOperationException.scannerError("Error preparing sample statement for table: " + tableName, e);
+     * Implements MySQL-specific SQL for sampling table data.
+     * Uses MySQL LIMIT syntax.
+     *
+     * @param tableName Table name
+     * @return SQL string for sampling
+     */
+    @Override
+    protected String buildSampleTableSql(String tableName) {
+        return String.format("SELECT * FROM %s LIMIT ?", escapeIdentifier(tableName));
     }
-}
+
+    /**
+     * Implements MySQL-specific SQL for sampling column data.
+     * Uses MySQL LIMIT syntax.
+     *
+     * @param tableName  Table name
+     * @param columnName Column name
+     * @return SQL string for sampling column data
+     */
+    @Override
+    protected String buildSampleColumnSql(String tableName, String columnName) {
+        return String.format("SELECT %s FROM %s LIMIT ?",
+                escapeIdentifier(columnName),
+                escapeIdentifier(tableName));
+    }
+
+    /**
+     * Optimized implementation for MySQL-specific prepared statements.
+     * Uses MySQL's streaming mode for efficient large result set handling.
+     */
+    @Override
+    protected PreparedStatement prepareSampleTableStatement(Connection connection, String tableName, int limit)
+            throws SQLException {
+        try {
+            // MySQL-specific optimizations for sampling
+            String sql = buildSampleTableSql(tableName);
+            PreparedStatement stmt = connection.prepareStatement(
+                    sql,
+                    ResultSet.TYPE_FORWARD_ONLY,
+                    ResultSet.CONCUR_READ_ONLY
+            );
+            // Set to streaming mode for MySQL (server-side cursors)
+            stmt.setFetchSize(Integer.MIN_VALUE);
+            stmt.setInt(1, limit);
+            return stmt;
+        } catch (SQLException e) {
+            throw DatabaseOperationException.scannerError("Error preparing sample statement for table: " + tableName, e);
+        }
+    }
 
     /**
      * Optimized implementation for MySQL-specific column sampling.
@@ -367,21 +398,19 @@ protected PreparedStatement prepareSampleTableStatement(Connection connection, S
     protected PreparedStatement prepareSampleColumnStatement(Connection connection, String tableName,
                                                              String columnName, int limit)
             throws SQLException {
-                try{
-        String sql = String.format("SELECT %s FROM %s LIMIT ?",
-                escapeIdentifier(columnName),
-                escapeIdentifier(tableName));
-        PreparedStatement stmt = connection.prepareStatement(
-                sql,
-                ResultSet.TYPE_FORWARD_ONLY,
-                ResultSet.CONCUR_READ_ONLY
-        );
-        // Set to streaming mode for MySQL
-        stmt.setFetchSize(Integer.MIN_VALUE);
-        stmt.setInt(1, limit);
-        return stmt;
-                }catch(SQLException e){
-                    throw DatabaseOperationException.scannerError("Error preparing sample statement for column: " + columnName, e);
-                }
+        try {
+            String sql = buildSampleColumnSql(tableName, columnName);
+            PreparedStatement stmt = connection.prepareStatement(
+                    sql,
+                    ResultSet.TYPE_FORWARD_ONLY,
+                    ResultSet.CONCUR_READ_ONLY
+            );
+            // Set to streaming mode for MySQL
+            stmt.setFetchSize(Integer.MIN_VALUE);
+            stmt.setInt(1, limit);
+            return stmt;
+        } catch (SQLException e) {
+            throw DatabaseOperationException.scannerError("Error preparing sample statement for column: " + columnName, e);
+        }
     }
 }
