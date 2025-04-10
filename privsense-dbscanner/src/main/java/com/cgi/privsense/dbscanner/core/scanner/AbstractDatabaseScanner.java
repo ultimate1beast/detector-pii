@@ -2,8 +2,9 @@ package com.cgi.privsense.dbscanner.core.scanner;
 
 import com.cgi.privsense.common.util.DatabaseUtils;
 import com.cgi.privsense.dbscanner.exception.DatabaseOperationException;
-
 import com.cgi.privsense.dbscanner.model.DataSample;
+import lombok.Builder;
+import lombok.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
@@ -50,7 +51,7 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
      * @param dbType     The database type
      */
     protected AbstractDatabaseScanner(DataSource dataSource, String dbType) {
-        this(dataSource, dbType, new JdbcSettings());
+        this(dataSource, dbType, JdbcSettings.builder().build());
     }
 
     /**
@@ -101,13 +102,13 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
             logger.debug("Operation completed successfully: {}", operationName);
             return result;
         } catch (DataAccessException e) {
-            // Don't log and rethrow - just add context and rethrow
+            // Add context and rethrow
             throw DatabaseOperationException.scannerError(
                     String.format("Error during %s operation on %s database: %s",
                             operationName, dbType, e.getMessage()),
                     e);
         } catch (Exception e) {
-            // Don't log and rethrow - just add context and rethrow
+            // Add context and rethrow
             throw DatabaseOperationException.scannerError(
                     String.format("Unexpected error during %s operation on %s database: %s",
                             operationName, dbType, e.getMessage()),
@@ -118,6 +119,7 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
     /**
      * Template method for sampling table data.
      * Implements the common pattern for all database types.
+     * Dialect-specific implementations will be handled by subclasses.
      *
      * @param tableName Table name
      * @param limit     Maximum number of rows
@@ -157,7 +159,7 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
 
                 return DataSample.create(tableName, rows);
             } catch (SQLException e) {
-                // Don't log and rethrow - just add context and rethrow
+                // Add context and rethrow
                 throw DatabaseOperationException.samplingError("Error sampling table: " + tableName, e);
             }
         });
@@ -166,6 +168,7 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
     /**
      * Template method for sampling column data.
      * Implements the common pattern for all database types.
+     * Dialect-specific implementations will be handled by subclasses.
      *
      * @param tableName  Table name
      * @param columnName Column name
@@ -194,7 +197,7 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
                 }
                 return values;
             } catch (SQLException e) {
-                // Don't log and rethrow - just add context and rethrow
+                // Add context and rethrow
                 throw DatabaseOperationException.samplingError(
                         "Error sampling column: " + tableName + "." + columnName, e);
             }
@@ -203,19 +206,16 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
 
     /**
      * Builds and returns SQL for sampling table data.
-     * Subclasses can override this to customize SQL generation.
+     * Subclasses must override this to provide database-specific SQL generation.
      *
      * @param tableName Table name
      * @return SQL string for sampling
      */
-    protected String buildSampleTableSql(String tableName) {
-        return String.format("SELECT * FROM %s LIMIT ?", escapeIdentifier(tableName));
-    }
+    protected abstract String buildSampleTableSql(String tableName);
 
     /**
      * Creates a prepared statement for sampling table data.
-     * Subclasses can override the buildSampleTableSql method to customize SQL
-     * generation.
+     * Delegates to buildSampleTableSql which is overridden by database-specific subclasses.
      * <p>
      * NOTE: The caller is responsible for closing the returned PreparedStatement.
      * This method intentionally does not close the statement as it needs to be
@@ -250,8 +250,18 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
     }
 
     /**
+     * Builds SQL for sampling column data.
+     * Subclasses must override this to provide database-specific SQL generation.
+     *
+     * @param tableName  Table name
+     * @param columnName Column name
+     * @return SQL string for sampling column data
+     */
+    protected abstract String buildSampleColumnSql(String tableName, String columnName);
+
+    /**
      * Creates a prepared statement for sampling column data.
-     * Subclasses can override this to customize SQL generation.
+     * Delegates to buildSampleColumnSql which is overridden by database-specific subclasses.
      * <p>
      * NOTE: The caller is responsible for closing the returned PreparedStatement.
      * This method intentionally does not close the statement as it needs to be
@@ -267,9 +277,7 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
     protected PreparedStatement prepareSampleColumnStatement(Connection connection, String tableName,
             String columnName, int limit)
             throws SQLException {
-        String sql = String.format("SELECT %s FROM %s LIMIT ?",
-                escapeIdentifier(columnName),
-                escapeIdentifier(tableName));
+        String sql = buildSampleColumnSql(tableName, columnName);
         PreparedStatement stmt = null;
         try {
             stmt = connection.prepareStatement(sql);
@@ -291,6 +299,7 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
 
     /**
      * Checks if a table exists.
+     * Subclasses may override this to provide database-specific implementation.
      *
      * @param tableName Table name
      * @return true if the table exists, false otherwise
@@ -298,7 +307,7 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
     protected boolean tableExists(String tableName) {
         DatabaseUtils.validateTableName(tableName);
         try {
-            String sql = String.format("SELECT 1 FROM %s WHERE 1 = 0", escapeIdentifier(tableName));
+            String sql = buildTableExistsSql(tableName);
             jdbcTemplate.queryForObject(sql, Integer.class);
             return true;
         } catch (Exception e) {
@@ -306,6 +315,17 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
                     tableName, e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * Builds SQL for checking if a table exists.
+     * Subclasses should override this to provide database-specific SQL generation.
+     *
+     * @param tableName Table name
+     * @return SQL string for checking table existence
+     */
+    protected String buildTableExistsSql(String tableName) {
+        return String.format("SELECT 1 FROM %s WHERE 1 = 0", escapeIdentifier(tableName));
     }
 
     /**
@@ -320,33 +340,19 @@ public abstract class AbstractDatabaseScanner implements DatabaseScanner {
     }
 
     /**
-     * JDBC settings class for configuring database connections.
+     * Immutable JDBC settings class for configuring database connections.
+     * Uses Lombok @Value for immutability and @Builder for the builder pattern.
      */
+    @Value
+    @Builder
     public static class JdbcSettings {
-        private int fetchSize = 1000;
-        private int maxRows = 10000;
-        private int queryTimeoutSeconds = 30;
-
-        public JdbcSettings() {
-            // Default constructor with default values
-        }
-
-        public JdbcSettings(int fetchSize, int maxRows, int queryTimeoutSeconds) {
-            this.fetchSize = fetchSize;
-            this.maxRows = maxRows;
-            this.queryTimeoutSeconds = queryTimeoutSeconds;
-        }
-
-        public int getFetchSize() {
-            return fetchSize;
-        }
-
-        public int getMaxRows() {
-            return maxRows;
-        }
-
-        public int getQueryTimeoutSeconds() {
-            return queryTimeoutSeconds;
-        }
+        @Builder.Default
+        int fetchSize = 1000;
+        
+        @Builder.Default
+        int maxRows = 10000;
+        
+        @Builder.Default
+        int queryTimeoutSeconds = 30;
     }
 }
