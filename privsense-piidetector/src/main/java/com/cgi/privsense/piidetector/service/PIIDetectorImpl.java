@@ -3,6 +3,7 @@
  */
 package com.cgi.privsense.piidetector.service;
 
+import com.cgi.privsense.common.config.properties.PiiDetectionProperties;
 import com.cgi.privsense.dbscanner.model.ColumnMetadata;
 import com.cgi.privsense.dbscanner.model.TableMetadata;
 import com.cgi.privsense.dbscanner.service.OptimizedParallelSamplingService;
@@ -19,7 +20,6 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 
@@ -59,8 +59,7 @@ public class PIIDetectorImpl implements PIIDetector {
             PIIDetectionCacheManager cacheManager,
             DetectionResultFactory resultFactory,
             TablePIIService tablePIIService,
-            @Value("${piidetector.confidence.threshold:0.7}") double confidenceThreshold,
-            @Value("${piidetector.sampling.limit:10}") int sampleSize) {
+            PiiDetectionProperties piiDetectionProperties) {
 
         this.scannerService = scannerService;
         this.samplingService = samplingService;
@@ -70,8 +69,10 @@ public class PIIDetectorImpl implements PIIDetector {
         this.cacheManager = cacheManager;
         this.resultFactory = resultFactory;
         this.tablePIIService = tablePIIService;
-        this.confidenceThreshold = confidenceThreshold;
-        this.sampleSize = sampleSize;
+
+        // Access properties through the PiiDetectionProperties object
+        this.confidenceThreshold = piiDetectionProperties.getDetection().getConfidenceThreshold();
+        this.sampleSize = piiDetectionProperties.getDetection().getSamplingLimit();
 
         // Default: enable all strategies
         strategyFactory.getAllStrategies().forEach(strategy -> activeStrategies.put(strategy.getName(), true));
@@ -215,12 +216,14 @@ public class PIIDetectorImpl implements PIIDetector {
 
     /**
      * Sets the self-reference to this bean.
-     * Used by CachingConfiguration to ensure that internal calls go through the caching proxy.
+     * Used by CachingConfiguration to ensure that internal calls go through the
+     * caching proxy.
      *
      * @param self The proxied PIIDetector (this bean)
      */
     public void setSelf(PIIDetector self) {
-        // Using self as a local variable in this method, no need to store as class field
+        // Using self as a local variable in this method, no need to store as class
+        // field
         log.debug("Self-reference to PIIDetector received for proper cache handling");
     }
 
