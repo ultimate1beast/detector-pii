@@ -1,6 +1,6 @@
 package com.cgi.privsense.dbscanner.core.driver;
 
-import com.cgi.privsense.common.config.GlobalProperties;
+import com.cgi.privsense.common.config.properties.DatabaseProperties;
 import com.cgi.privsense.dbscanner.exception.DatabaseOperationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -53,10 +53,13 @@ public class MavenDriverManager implements DriverManager {
      *
      * @param properties Global application properties
      */
-    public MavenDriverManager(GlobalProperties properties) {
-        this.driverMavenCoordinates = properties.getDrivers().getCoordinates();
-        this.driversDir = Paths.get(properties.getDrivers().getDirectory());
-        this.repositoryUrl = properties.getDrivers().getRepositoryUrl();
+    public MavenDriverManager(DatabaseProperties databaseProperties) {
+        // Get driver properties from the database properties
+        DatabaseProperties.DriverProperties driverProps = databaseProperties.getDrivers();
+
+        this.driverMavenCoordinates = driverProps.getCoordinates();
+        this.driversDir = Paths.get(driverProps.getDirectory());
+        this.repositoryUrl = driverProps.getRepositoryUrl();
 
         try {
             // Create the drivers directory if it doesn't exist
@@ -73,13 +76,13 @@ public class MavenDriverManager implements DriverManager {
         if (driverClassName == null || driverClassName.isEmpty()) {
             throw DatabaseOperationException.driverError("Driver class name cannot be null or empty");
         }
-    
+
         // First check without locking
         if (isDriverLoaded(driverClassName)) {
             log.debug("Driver already loaded: {}", driverClassName);
             return;
         }
-    
+
         // Skip the separate readLock section and go directly to the writeLock
         driversLock.writeLock().lock();
         try {
@@ -88,17 +91,17 @@ public class MavenDriverManager implements DriverManager {
                 log.debug("Driver already loaded (detected after write lock): {}", driverClassName);
                 return;
             }
-    
+
             String mavenCoordinates = driverMavenCoordinates.get(driverClassName);
             if (mavenCoordinates == null) {
                 throw DatabaseOperationException.driverError("Unknown driver: " + driverClassName +
                         ". Add Maven coordinates to configuration properties.");
             }
-    
+
             // Download and load the driver
             Path driverJar = downloadDriver(mavenCoordinates);
             loadDriver(driverClassName, driverJar);
-    
+
             log.info("Successfully loaded driver: {}", driverClassName);
         } catch (Exception e) {
             log.error("Failed to load driver: {}", driverClassName, e);
@@ -170,8 +173,7 @@ public class MavenDriverManager implements DriverManager {
         // Build the Maven repository URI
         URI uri = URI.create(String.format(
                 "%s/%s/%s/%s/%s-%s.jar",
-                repositoryUrl, groupId, artifactId, version, artifactId, version
-        ));
+                repositoryUrl, groupId, artifactId, version, artifactId, version));
 
         try {
             log.info("Downloading driver from: {}", uri);
@@ -196,15 +198,14 @@ public class MavenDriverManager implements DriverManager {
      * Loads a driver from a JAR file with improved error handling.
      *
      * @param driverClassName Name of the driver class
-     * @param jarPath Path to the JAR file
+     * @param jarPath         Path to the JAR file
      */
     private void loadDriver(String driverClassName, Path jarPath) {
         try {
             // Create a URL class loader with the driver JAR
             URLClassLoader classLoader = new URLClassLoader(
-                    new URL[]{jarPath.toUri().toURL()},
-                    getClass().getClassLoader()
-            );
+                    new URL[] { jarPath.toUri().toURL() },
+                    getClass().getClassLoader());
 
             // Load and instantiate the driver
             Class<?> driverClass = Class.forName(driverClassName, true, classLoader);

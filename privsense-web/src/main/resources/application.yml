@@ -17,68 +17,76 @@ spring:
     caffeine:
       spec: maximumSize=1000,expireAfterWrite=60m
 
-# Root level properties for backward compatibility
-piidetector:
-  ner:
-    service:
-      url: ${privsense.piiDetector.ner.service.url}
-    trust:
-      all:
-        certs: ${privsense.piiDetector.ner.trust.all.certs}
-
-# PrivSense Global Configuration
+# PrivSense Configuration
 privsense:
-  piiDetector:
-    confidence:
-      threshold: 0.7
-    sampling:
-      limit: 10
-    ner:
-      service:
-        url: http://localhost:5000/ner
-      trust:
-        all:
-          certs: false
-
+  # PII Detection Configuration
+  pii-detection:
+    # NER Service Configuration
+    ner-service:
+      url: http://localhost:5000/ner
+      timeout: 10000
+      max-request-size: 100KB
+      trust-all-certs: false
+    
+    # Detection Configuration
+    detection:
+      confidence-threshold: 0.7
+      sampling-limit: 10
+      batch-size: 20
+      enable-cache: true
+  
   # Database Scanner Configuration
-  dbScanner:
-    # Drivers configuration
+  database:
+    # Scanner Configuration
+    scanner:
+      cache-ttl: 60m
+      max-tables: 1000
+      schema-filter: public
+      include-views: true
+    
+    # Driver Management
     drivers:
-      directory: ${user.home}/.dbscanner/drivers
+      directory: ${user.home}/.privsense/drivers
       repository-url: https://repo1.maven.org/maven2
       coordinates:
         oracle.jdbc.OracleDriver: com.oracle.database.jdbc:ojdbc8:23.3.0
         com.mysql.cj.jdbc.Driver: mysql:mysql-connector-java:8.0.33
         org.postgresql.Driver: org.postgresql:postgresql:42.7.1
-
-    # Queue configuration
-    queue:
-      capacity: 1000
+    
+    # Connection Pool Configuration
+    connection-pool:
+      max-size: 10
+      min-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 60000
+      max-lifetime: 1800000
+      leak-detection-threshold: 60000
+    
+    # Sampling Configuration  
+    sampling:
+      default-size: 100
+      max-size: 10000
+      timeout: 30
+      timeout-unit: SECONDS
+      use-reservoir-for-large-tables: true
+      reservoir-threshold: 10000
+    
+    # Task Processing
+    tasks:
+      queue-capacity: 1000
       batch-size: 20
       poll-timeout: 500
       poll-timeout-unit: MILLISECONDS
-
-    # Threads configuration
-    threads:
-      max-pool-size: 8
+      thread-pool-size: 8
       sampler-pool-size: 4
       sampling-consumers: 3
-
-    # Sampling configuration
-    sampling:
-      timeout: 30
-      timeout-unit: SECONDS
-      use-queue: true
-      default-sample-size: 100
-      max-sample-size: 10000
-
-    # Connection pool configuration
-    connectionPool:
-      default-max-pool-size: 10
-      default-min-idle: 2
-      default-connection-timeout: 30000
-      default-idle-timeout: 60000
-      default-max-lifetime: 1800000
-      default-leak-detection-threshold: 60000
-
-# Logging and other configuration remains the same
+      
+# Logging Configuration
+logging:
+  level:
+    root: INFO
+    com.cgi.privsense: INFO
+    org.springframework: WARN
+    com.zaxxer.hikari: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
