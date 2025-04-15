@@ -7,7 +7,6 @@ import io.swagger.v3.oas.models.info.License;
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.servers.Server;
 import org.springdoc.core.models.GroupedOpenApi;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -15,22 +14,21 @@ import org.springframework.context.annotation.Configuration;
 public class SpringDocConfig {
 
     @Bean
-    public OpenAPI apiInfo() {
+    public OpenAPI customOpenAPI() {
         return new OpenAPI()
-                .components(new Components())
-                .addServersItem(new Server().url("/").description("Default Server URL"))
                 .info(new Info()
                         .title("PrivSense API")
-                        .description("API for database scanning and PII detection")
                         .version("1.0.0")
+                        .description("API for database scanning and PII detection")
                         .contact(new Contact()
                                 .name("CGI")
                                 .url("https://www.cgi.com")
                                 .email("support@privsense.com"))
                         .license(new License()
                                 .name("Proprietary")
-                                .url("https://www.cgi.com/licenses"))
-                );
+                                .url("https://www.cgi.com/licenses")))
+                .components(new Components())
+                .addServersItem(new Server().url("/").description("Default Server URL"));
     }
 
     @Bean
@@ -51,7 +49,6 @@ public class SpringDocConfig {
                 .build();
     }
 
-    // If you have any other API groups, add them here
     @Bean
     public GroupedOpenApi actuatorApi() {
         return GroupedOpenApi.builder()
