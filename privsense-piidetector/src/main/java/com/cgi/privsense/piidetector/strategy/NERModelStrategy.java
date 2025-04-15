@@ -6,7 +6,7 @@ package com.cgi.privsense.piidetector.strategy;
 import com.cgi.privsense.piidetector.model.ColumnPIIInfo;
 import com.cgi.privsense.piidetector.model.enums.DetectionMethod;
 import com.cgi.privsense.piidetector.model.enums.PIIType;
-import com.cgi.privsense.piidetector.service.NERServiceClient;
+import com.cgi.privsense.piidetector.api.NERServiceClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

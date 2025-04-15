@@ -1,6 +1,5 @@
 package com.cgi.privsense.dbscanner.service;
-
-import com.cgi.privsense.common.config.GlobalProperties;
+import com.cgi.privsense.common.config.properties.DatabaseProperties;
 import com.cgi.privsense.dbscanner.core.datasource.DataSourceProvider;
 import com.cgi.privsense.dbscanner.core.scanner.DatabaseScannerFactory;
 import com.cgi.privsense.dbscanner.model.DataSample;
@@ -25,24 +24,24 @@ public class OptimizedParallelSamplingService implements DisposableBean {
     private final SamplingStrategy samplingStrategy;
 
     /**
-     * Constructor with dependencies and configuration.
-     *
-     * @param dataSourceProvider Provider for data sources
-     * @param scannerFactory     Factory for database scanners
-     * @param properties         Global application properties
-     */
-    public OptimizedParallelSamplingService(
-            DataSourceProvider dataSourceProvider,
-            DatabaseScannerFactory scannerFactory,
-            GlobalProperties properties) {
-        
-        // Create the strategy implementation directly
-        // In a more complex application, this could be injected using Spring's dependency injection
-        this.samplingStrategy = new OptimizedParallelSamplingStrategy(
-                dataSourceProvider, scannerFactory, properties);
-        
-        log.info("Initialized optimized parallel sampling service facade");
-    }
+ * Constructor with dependencies and configuration.
+ *
+ * @param dataSourceProvider Provider for data sources
+ * @param scannerFactory     Factory for database scanners
+ * @param databaseProperties Database properties
+ */
+public OptimizedParallelSamplingService(
+        DataSourceProvider dataSourceProvider,
+        DatabaseScannerFactory scannerFactory,
+        DatabaseProperties databaseProperties) {
+    
+    // Create the strategy implementation directly
+    // In a more complex application, this could be injected using Spring's dependency injection
+    this.samplingStrategy = new OptimizedParallelSamplingStrategy(
+            dataSourceProvider, scannerFactory, databaseProperties);
+    
+    log.info("Initialized optimized parallel sampling service facade");
+}
 
     /**
      * Samples data from a table.

@@ -10,6 +10,7 @@ import com.cgi.privsense.dbscanner.exception.DatabaseOperationException;
 import com.zaxxer.hikari.HikariDataSource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.jdbc.DataSourceBuilder;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
@@ -66,6 +67,14 @@ public class DataSourceProviderImpl implements DataSourceProvider {
      * Lock for thread-safe modifications to the dataSources map.
      */
     private final ReentrantReadWriteLock dataSourcesLock = new ReentrantReadWriteLock();
+
+
+
+    @Bean
+    @Primary
+    public DataSource defaultDataSource() {
+        return new EmptyDataSource();
+    }
 
     /**
      * Constructor.
